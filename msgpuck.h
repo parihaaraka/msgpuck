@@ -119,17 +119,17 @@ extern "C" {
 
 #if defined(__CC_ARM)         /* set the alignment to 1 for armcc compiler */
 #define MP_PACKED    __packed
-#define MP_PACKED_END 
+#define MP_PACKED_END
 #define MP_CONST __attribute__((const))
 #define MP_PURE __attribute__((pure))
 #elif defined(__GNUC__)
 #define MP_PACKED  __attribute__((packed))
-#define MP_PACKED_END 
+#define MP_PACKED_END
 #define MP_CONST __attribute__((const))
 #define MP_PURE __attribute__((pure))
 #elif defined(_MSC_VER)
-#define MP_CONST 
-#define MP_PURE 
+#define MP_CONST
+#define MP_PURE
 #define MP_PACKED __pragma(pack(push, 1))
 #define MP_PACKED_END __pragma(pack(pop))
 #endif
@@ -438,6 +438,56 @@ MP_PROTO char *
 mp_encode_array(char *data, uint32_t size);
 
 /**
+ * \brief Encode an array header of \a size elements to a buffer
+ * \a data of size \a data_sz checking for overflow.
+ *
+ * Encode an array header of \a size elements to a buffer
+ * \a data of size \a data_sz checking for overflow.
+ *
+ * If \a data_sz == NULL then it is equivalent to \link mp_encode_array()
+ * mp_encode_array() \endlink.
+ *
+ * Otherwise if header size fits into the buffer then it is written and
+ * \a data_sz is decreased by the header size.
+ *
+ * Otherwise if header size does not fit into the buffer it is not written
+ * but \a data_sz is still decreased by the header size.
+ *
+ * NOTE that in future the implementation of the last case can be changed
+ * to truncating header instead of skipping or to something else.
+ *
+ * All array members must be encoded after the header.
+ *
+ * Example usage:
+ * \code
+ *
+ * // Calculate required space:
+ * ptrdiff_t len = 0;
+ * mp_encode_array_safe(NULL, &len, 2)
+ * mp_encode_uint_safe(NULL, &len, 10)
+ * mp_encode_uint_safe(NULL, &len, 10)
+ *
+ * // Allocate space
+ * char *p = malloc(-len);
+ *
+ * // Encode
+ * p = mp_encode_array_safe(p, NULL, 2)
+ * p = mp_encode_uint_safe(p, NULL, 10)
+ * p = mp_encode_uint_safe(p, NULL, 10)
+ * \endcode
+ *
+ * Given the code structure is same when calculating required space and
+ * when encoding one can put it into a function and avoid code duplication.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param size - a number of elements
+ * \return \a data updated to the position after written header
+ */
+MP_PROTO char *
+mp_encode_array_safe(char *data, ptrdiff_t *data_sz, uint32_t size);
+
+/**
  * \brief Check that \a cur buffer has enough bytes to decode an array header
  * \param cur buffer
  * \param end end of the buffer
@@ -509,6 +559,22 @@ MP_PROTO char *
 mp_encode_map(char *data, uint32_t size);
 
 /**
+ * \brief Encode a map header of \a size elements to a buffer
+ * \a data of size \a data_sz checking for overflow.
+ *
+ * All map key-value pairs must be encoded after the header.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param size - a number of key/value pairs
+ * \return \a data updated to the position after written header
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_map_safe(char *data, ptrdiff_t *data_sz, uint32_t size);
+
+/**
  * \brief Check that \a cur buffer has enough bytes to decode a map header
  * \param cur buffer
  * \param end end of the buffer
@@ -559,8 +625,27 @@ MP_PROTO char *
 mp_encode_extl(char *data, int8_t type, uint32_t len);
 
 /**
+ * \brief Encode extension header with \a type and value length \a len
+ * to a buffer \a data of size \a data_sz checking for overflow.
+ *
+ * The value must be encoded after the header.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param type - extension type
+ * \param len - lenght of the extension data
+ * \return \a data updated to the position after written header
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_extl_safe(char *data, ptrdiff_t *data_sz, int8_t type, uint32_t len);
+
+/**
  * \brief Encode extension data of length \a len.
- * The function is equivalent to mp_encode_extl() + memcpy.
+ *
+ * The function is equivalent to mp_encode_extl() + mp_memcpy().
+ *
  * \param data - a buffer
  * \param type - extension type to encode
  * \param str - a pointer to extension data
@@ -571,6 +656,23 @@ mp_encode_extl(char *data, int8_t type, uint32_t len);
  */
 MP_PROTO char *
 mp_encode_ext(char *data, int8_t type, const char *str, uint32_t len);
+
+/**
+ * \brief Encode extension data \a str of length \a len with type \a type
+ * to a buffer \a data of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param type - extension type to encode
+ * \param str - a pointer to extension data
+ * \param len - a extension data length
+ * \return \a data updated to the position after written extension payload.
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_ext_safe(char *data, ptrdiff_t *data_sz,
+		   int8_t type, const char *str, uint32_t len);
 
 /**
  * \brief Check that \a cur buffer has enough bytes to decode an ext header.
@@ -649,6 +751,20 @@ MP_PROTO char *
 mp_encode_uint(char *data, uint64_t num);
 
 /**
+ * \brief Encode an unsigned integer \a num to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param num - a number
+ * \return \a data updated to the position after written value
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_uint_safe(char *data, ptrdiff_t *data_sz, uint64_t num);
+
+/**
  * \brief Encode a signed integer \a num.
  * It is your responsibility to ensure that \a data has enough space.
  * \param data - a buffer
@@ -660,6 +776,20 @@ mp_encode_uint(char *data, uint64_t num);
  */
 MP_PROTO char *
 mp_encode_int(char *data, int64_t num);
+
+/**
+ * \brief Encode a signed integer \a num to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param num - a number
+ * \return \a data updated to the position after written value
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_int_safe(char *data, ptrdiff_t *data_sz, int64_t num);
 
 /**
  * \brief Check that \a cur buffer has enough bytes to decode an uint
@@ -684,6 +814,10 @@ mp_check_uint(const char *cur, const char *end);
  */
 MP_PROTO MP_PURE ptrdiff_t
 mp_check_int(const char *cur, const char *end);
+
+/** \brief Decode unsigned int tail with the first byte \a type already known. */
+MP_PROTO uint64_t
+mp_decode_uint_data(uint8_t type, const char **data);
 
 /**
  * \brief Decode an unsigned integer from MsgPack \a data
@@ -750,6 +884,20 @@ MP_PROTO char *
 mp_encode_float(char *data, float num);
 
 /**
+ * \brief Encode a float \a num to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param num - a float
+ * \return \a data updated to the position after written value
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_float_safe(char *data, ptrdiff_t *data_sz, float num);
+
+/**
  * \brief Encode a double \a num.
  * It is your responsibility to ensure that \a data has enough space.
  * \param data - a buffer
@@ -760,6 +908,20 @@ mp_encode_float(char *data, float num);
  */
 MP_PROTO char *
 mp_encode_double(char *data, double num);
+
+/**
+ * \brief Encode a double \a num to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param num - a number
+ * \return \a data updated to the position after written value
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_double_safe(char *data, ptrdiff_t *data_sz, double num);
 
 /**
  * \brief Check that \a cur buffer has enough bytes to decode a float
@@ -857,14 +1019,11 @@ mp_sizeof_bin(uint32_t len);
  * char *b = buffer;
  * b = mp_encode_strl(b, hdr.total_len);
  * char *s = b;
- * memcpy(b, pkt1.data, pkt1.len);
- * b += pkt1.len;
+ * b = mp_memcpy(b, pkt1.data, pkt1.len);
  * // get next packet
- * memcpy(b, pkt2.data, pkt2.len);
- * b += pkt2.len;
+ * b = mp_memcpy(b, pkt2.data, pkt2.len);
  * // get next packet
- * memcpy(b, pkt1.data, pkt3.len);
- * b += pkt3.len;
+ * b = mp_memcpy(b, pkt1.data, pkt3.len);
  *
  * // Check that all data was received
  * assert(hdr.total_len == (uint32_t) (b - s))
@@ -879,8 +1038,22 @@ MP_PROTO char *
 mp_encode_strl(char *data, uint32_t len);
 
 /**
+ * \brief Encode a string header of length \a len to a buffer
+ * \a data of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param len - a string length
+ * \return \a data updated to the position after written header
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_strl_safe(char *data, ptrdiff_t *data_sz, uint32_t len);
+
+/**
  * \brief Encode a string of length \a len.
- * The function is equivalent to mp_encode_strl() + memcpy.
+ * The function is equivalent to mp_encode_strl() + mp_memcpy().
  * \param data - a buffer
  * \param str - a pointer to string data
  * \param len - a string length
@@ -890,6 +1063,46 @@ mp_encode_strl(char *data, uint32_t len);
  */
 MP_PROTO char *
 mp_encode_str(char *data, const char *str, uint32_t len);
+
+/**
+ * \brief Encode a string \a str of length \a len to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param str - a pointer to string data
+ * \param len - a string length
+ * \return \a data updated to the position after written string payload
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_str_safe(char *data, ptrdiff_t *data_sz,
+		   const char *str, uint32_t len);
+
+/**
+ * \brief Encode a null-terminated string
+ * The function is equivalent to mp_encode_str() with len = strlen(str)
+ * \param data - a buffer
+ * \param str - a pointer to string data
+ * \return mp_encode_str(data, str, strlen(str))
+ */
+MP_PROTO char *
+mp_encode_str0(char *data, const char *str);
+
+/**
+ * \brief Encode a null-terminated string \a str to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param str - a pointer to string data
+ * \return \a data updated to the position after written string payload
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_str0_safe(char *data, ptrdiff_t *data_sz, const char *str);
 
 /**
  * \brief Encode a binstring header of length \a len.
@@ -903,8 +1116,22 @@ MP_PROTO char *
 mp_encode_binl(char *data, uint32_t len);
 
 /**
+ * \brief Encode a binstring header of length \a len to a buffer
+ * \a data of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param len - a string length
+ * \return \a data updated to the position after written header
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_binl_safe(char *data, ptrdiff_t *data_sz, uint32_t len);
+
+/**
  * \brief Encode a binstring of length \a len.
- * The function is equivalent to mp_encode_binl() + memcpy.
+ * The function is equivalent to mp_encode_binl() + mp_memcpy().
  * \param data - a buffer
  * \param str - a pointer to binstring data
  * \param len - a binstring length
@@ -914,6 +1141,22 @@ mp_encode_binl(char *data, uint32_t len);
  */
 MP_PROTO char *
 mp_encode_bin(char *data, const char *str, uint32_t len);
+
+/**
+ * \brief Encode a binstring \a str of length \a len to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param str - a pointer to binstring data
+ * \param len - a binstring length
+ * \return \a data updated to the position after written binstring payload
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_bin_safe(char *data, ptrdiff_t *data_sz,
+		   const char *str, uint32_t len);
 
 /**
  * \brief Encode a sequence of values according to format string.
@@ -1071,6 +1314,21 @@ extern mp_snprint_ext_f mp_snprint_ext;
 int
 mp_snprint_ext_default(char *buf, int size, const char **data, int depth);
 
+typedef int (*mp_check_ext_data_f)(int8_t type, const char *data, uint32_t len);
+
+/**
+ * \brief Function called by mp_check() to validate user-defined MP_EXT types.
+ */
+extern mp_check_ext_data_f mp_check_ext_data;
+
+/**
+ * \brief Default MP_EXT checker. Does nothing since knows nothing of
+ * user-defined extension types.
+ * \retval 0
+ */
+int
+mp_check_ext_data_default(int8_t type, const char *data, uint32_t len);
+
 /**
  * \brief Check that \a cur buffer has enough bytes to decode a string header
  * \param cur buffer
@@ -1179,6 +1437,19 @@ MP_PROTO char *
 mp_encode_nil(char *data);
 
 /**
+ * \brief Encode the nil value to a buffer \a data of size \a data_sz
+ * checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \return \a data updated to the position after written value
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_nil_safe(char *data, ptrdiff_t *data_sz);
+
+/**
  * \brief Check that \a cur buffer has enough bytes to decode nil
  * \param cur buffer
  * \param end end of the buffer
@@ -1220,6 +1491,20 @@ MP_PROTO char *
 mp_encode_bool(char *data, bool val);
 
 /**
+ * \brief Encode a bool value \a val to a buffer \a data
+ * of size \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param val - a bool
+ * \return \a data updated to the position after written value
+ * \sa \link mp_encode_array_safe() An usage example and documentation details
+ * \endlink
+ */
+MP_PROTO char *
+mp_encode_bool_safe(char *data, ptrdiff_t *data_sz, bool val);
+
+/**
  * \brief Check that \a cur buffer has enough bytes to decode a bool value
  * \param cur buffer
  * \param end end of the buffer
@@ -1239,6 +1524,56 @@ mp_check_bool(const char *cur, const char *end);
  */
 MP_PROTO bool
 mp_decode_bool(const char **data);
+
+/**
+ * \brief Copy payload \a str of length \a len to a buffer \a data.
+ *
+ * Copy data just as memcpy do but additionally return updated
+ * buffer pointer.
+ *
+ * \param data - a buffer
+ * \param str - a pointer to payload
+ * \param len - a payload length
+ * \return \a data updated to the position after written payload
+ */
+MP_PROTO char *
+mp_memcpy(char *data, const char *str, uint32_t len);
+
+/**
+ * \brief Copy payload \a str of length \a len to a buffer \a data of size
+ * \a data_sz checking for overflow.
+ *
+ * \param data - a buffer
+ * \param data_sz - a pointer to the size of the buffer
+ * \param str - a pointer to payload
+ * \param len - a payload length
+ * \return \a data updated to the position after written payload
+ * \sa \link mp_encode_array_safe() Documentation details \endlink
+ */
+MP_PROTO char *
+mp_memcpy_safe(char *data, ptrdiff_t *data_sz, const char *str, uint32_t len);
+
+/**
+ * \brief Decode an integer value as int8_t from MsgPack \a data.
+ * \param data - the pointer to a buffer
+ * \param[out] ret - the pointer to save a result
+ * \retval  0 on success
+ * \retval -1 if underlying mp type is not MP_INT or MP_UINT
+ * \retval -1 if the result can't be stored in int8_t
+ */
+MP_PROTO int
+mp_read_int8(const char **data, int8_t *ret);
+
+/**
+ * \brief Decode an integer value as int16_t from MsgPack \a data.
+ * \param data - the pointer to a buffer
+ * \param[out] ret - the pointer to save a result
+ * \retval  0 on success
+ * \retval -1 if underlying mp type is not MP_INT or MP_UINT
+ * \retval -1 if the result can't be stored in int16_t
+ */
+MP_PROTO int
+mp_read_int16(const char **data, int16_t *ret);
 
 /**
  * \brief Decode an integer value as int32_t from MsgPack \a data.
@@ -1273,6 +1608,19 @@ mp_read_int64(const char **data, int64_t *ret);
  */
 MP_PROTO int
 mp_read_double(const char **data, double *ret);
+
+/**
+ * \brief Decode a floating point value as double from MsgPack \a data. Unlike
+ *        mp_read_double does not fail if the result can't be stored in double
+ *        without loss of precision.
+ * \param data - the pointer to a buffer
+ * \param[out] ret - the pointer to save a result
+ * \retval  0 on success
+ * \retval -1 if underlying mp type is not MP_INT, MP_UINT,
+ *            MP_FLOAT, or MP_DOUBLE
+ */
+MP_PROTO int
+mp_read_double_lossy(const char **data, double *ret);
 
 /**
  * \brief Skip one element in a packed \a data.
@@ -1335,6 +1683,52 @@ mp_read_double(const char **data, double *ret);
 MP_PROTO void
 mp_next(const char **data);
 
+/** mp_check() error type. */
+enum mp_check_error_type {
+	/** Truncated MsgPack data. */
+	MP_CHECK_ERROR_TRUNC,
+	/** Illegal MsgPack code. */
+	MP_CHECK_ERROR_ILL,
+	/** MsgPack extension check failed. */
+	MP_CHECK_ERROR_EXT,
+	/** Junk after MsgPack data (mp_check_exact() only). */
+	MP_CHECK_ERROR_JUNK,
+};
+
+/** mp_check() error info. */
+struct mp_check_error {
+	/** Error type. */
+	enum mp_check_error_type type;
+	/** Start of the checked MsgPack data. */
+	const char *data;
+	/** End of the checked MsgPack data. */
+	const char *end;
+	/** Position where mp_check() failed. */
+	const char *pos;
+	/**
+	 * Number of missing MsgPack values.
+	 * Relevant only if the type is MP_CHECK_ERROR_TRUNC.
+	 */
+	int64_t trunc_count;
+	/**
+	 * Type of the MsgPack extension that failed the check.
+	 * Relevant only if the type is MP_CHECK_ERROR_EXT.
+	 */
+	int8_t ext_type;
+	/**
+	 * Length of the MsgPack extension that failed the check.
+	 * Relevant only if the type is MP_CHECK_ERROR_EXT.
+	 */
+	uint32_t ext_len;
+};
+
+typedef void (*mp_check_on_error_f)(const struct mp_check_error *err);
+
+/**
+ * \brief Function called by mp_check() on error.
+ */
+extern mp_check_on_error_f mp_check_on_error;
+
 /**
  * \brief Equivalent to mp_next() but also validates MsgPack in \a data.
  * \param data - the pointer to a buffer
@@ -1347,6 +1741,22 @@ mp_next(const char **data);
  */
 MP_PROTO int
 mp_check(const char **data, const char *end);
+
+/**
+ * \brief Equivalent to mp_check() but also checks that there is no more
+ * data after validated MsgPack.
+ * \param data - the pointer to a buffer
+ * \param end - the end of a buffer
+ * \retval 0 when MsgPack in \a data is valid and there is no more data
+ * after validated MsgPack.
+ * \retval != 0 when MsgPack in \a data is not valid or there is data
+ * after validated MsgPack.
+ * \post *data = end on success
+ * \post *data is not defined if MsgPack is not valid
+ * \sa mp_check()
+ */
+MP_PROTO int
+mp_check_exact(const char **data, const char *end);
 
 /**
  * The maximum msgpack nesting depth supported by mp_snprint().
@@ -1474,7 +1884,7 @@ mp_frame_advance(struct mp_frame *frame);
 /** \cond false */
 extern const enum mp_type mp_type_hint[];
 extern const int8_t mp_parser_hint[];
-extern const char *mp_char2escape[];
+extern const char *const mp_char2escape[];
 extern const uint8_t mp_ext_hint[];
 
 MP_IMPL MP_ALWAYSINLINE enum mp_type
@@ -1508,6 +1918,17 @@ mp_encode_array(char *data, uint32_t size)
 		data = mp_store_u8(data, 0xdd);
 		return mp_store_u32(data, size);
 	}
+}
+
+MP_IMPL char *
+mp_encode_array_safe(char *data, ptrdiff_t *data_sz, uint32_t size)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_array(size);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_array(data, size);
 }
 
 MP_IMPL ptrdiff_t
@@ -1582,6 +2003,17 @@ mp_encode_map(char *data, uint32_t size)
 	}
 }
 
+MP_IMPL char *
+mp_encode_map_safe(char *data, ptrdiff_t *data_sz, uint32_t size)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_map(size);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_map(data, size);
+}
+
 MP_IMPL ptrdiff_t
 mp_check_map(const char *cur, const char *end)
 {
@@ -1651,11 +2083,33 @@ mp_encode_extl(char *data, int8_t type, uint32_t len)
 }
 
 MP_IMPL char *
+mp_encode_extl_safe(char *data, ptrdiff_t *data_sz, int8_t type, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_extl(len);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_extl(data, type, len);
+}
+
+MP_IMPL char *
 mp_encode_ext(char *data, int8_t type, const char *str, uint32_t len)
 {
 	data = mp_encode_extl(data, type, len);
-	memcpy(data, str, len);
-	return data + len;
+	return mp_memcpy(data, str, len);
+}
+
+MP_IMPL char *
+mp_encode_ext_safe(char *data, ptrdiff_t *data_sz,
+		   int8_t type, const char *str, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_ext(len);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_ext(data, type, str, len);
 }
 
 MP_IMPL ptrdiff_t
@@ -1782,6 +2236,17 @@ mp_encode_uint(char *data, uint64_t num)
 }
 
 MP_IMPL char *
+mp_encode_uint_safe(char *data, ptrdiff_t *data_sz, uint64_t num)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_uint(num);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_uint(data, num);
+}
+
+MP_IMPL char *
 mp_encode_int(char *data, int64_t num)
 {
 	assert(num < 0);
@@ -1802,11 +2267,21 @@ mp_encode_int(char *data, int64_t num)
 	}
 }
 
-MP_IMPL uint64_t
-mp_decode_uint(const char **data)
+MP_IMPL char *
+mp_encode_int_safe(char *data, ptrdiff_t *data_sz, int64_t num)
 {
-	uint8_t c = mp_load_u8(data);
-	switch (c) {
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_int(num);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_int(data, num);
+}
+
+MP_IMPL uint64_t
+mp_decode_uint_data(uint8_t type, const char **data)
+{
+	switch (type) {
 	case 0xcc:
 		return mp_load_u8(data);
 	case 0xcd:
@@ -1816,10 +2291,16 @@ mp_decode_uint(const char **data)
 	case 0xcf:
 		return mp_load_u64(data);
 	default:
-		if (mp_unlikely(c > 0x7f))
+		if (mp_unlikely(type > 0x7f))
 			mp_unreachable();
-		return c;
+		return type;
 	}
+}
+
+MP_IMPL uint64_t
+mp_decode_uint(const char **data)
+{
+	return mp_decode_uint_data(mp_load_u8(data), data);
 }
 
 MP_IMPL int
@@ -1827,39 +2308,33 @@ mp_compare_uint(const char *data_a, const char *data_b)
 {
 	uint8_t ca = mp_load_u8(&data_a);
 	uint8_t cb = mp_load_u8(&data_b);
-
-	int r = ca - cb;
-	if (r != 0)
-		return r;
-
-	if (ca <= 0x7f)
-		return 0;
-
 	uint64_t a, b;
-	switch (ca & 0x3) {
-	case 0xcc & 0x3:
+	if (ca != cb) {
+		a = mp_decode_uint_data(ca, &data_a);
+		b = mp_decode_uint_data(cb, &data_b);
+		return a < b ? -1 : a > b;
+	}
+	switch (ca) {
+	case 0xcc:
 		a = mp_load_u8(&data_a);
 		b = mp_load_u8(&data_b);
 		break;
-	case 0xcd & 0x3:
+	case 0xcd:
 		a = mp_load_u16(&data_a);
 		b = mp_load_u16(&data_b);
 		break;
-	case 0xce & 0x3:
+	case 0xce:
 		a = mp_load_u32(&data_a);
 		b = mp_load_u32(&data_b);
 		break;
-	case 0xcf & 0x3:
+	case 0xcf:
 		a = mp_load_u64(&data_a);
 		b = mp_load_u64(&data_b);
-		return a < b ? -1 : a > b;
 		break;
 	default:
-		mp_unreachable();
+		return 0;
 	}
-
-	int64_t v = (a - b);
-	return (v > 0) - (v < 0);
+	return a < b ? -1 : a > b;
 }
 
 MP_IMPL int64_t
@@ -1920,10 +2395,32 @@ mp_encode_float(char *data, float num)
 }
 
 MP_IMPL char *
+mp_encode_float_safe(char *data, ptrdiff_t *data_sz, float num)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_float(num);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_float(data, num);
+}
+
+MP_IMPL char *
 mp_encode_double(char *data, double num)
 {
 	data = mp_store_u8(data, 0xcb);
 	return mp_store_double(data, num);
+}
+
+MP_IMPL char *
+mp_encode_double_safe(char *data, ptrdiff_t *data_sz, double num)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_double(num);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_double(data, num);
 }
 
 MP_IMPL float
@@ -1942,6 +2439,24 @@ mp_decode_double(const char **data)
 	assert(c == 0xcb);
 	(void) c;
 	return mp_load_double(data);
+}
+
+MP_IMPL char *
+mp_memcpy(char *data, const char *str, uint32_t len)
+{
+	memcpy(data, str, len);
+	return data + len;
+}
+
+MP_PROTO char *
+mp_memcpy_safe(char *data, ptrdiff_t *data_sz, const char *str, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= len;
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_memcpy(data, str, len);
 }
 
 MP_IMPL uint32_t
@@ -2000,11 +2515,45 @@ mp_encode_strl(char *data, uint32_t len)
 }
 
 MP_IMPL char *
+mp_encode_strl_safe(char *data, ptrdiff_t *data_sz, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_strl(len);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_strl(data, len);
+}
+
+MP_IMPL char *
 mp_encode_str(char *data, const char *str, uint32_t len)
 {
 	data = mp_encode_strl(data, len);
-	memcpy(data, str, len);
-	return data + len;
+	return mp_memcpy(data, str, len);
+}
+
+MP_IMPL char *
+mp_encode_str_safe(char *data, ptrdiff_t *data_sz,
+		   const char *str, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_str(len);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_str(data, str, len);
+}
+
+MP_IMPL char *
+mp_encode_str0(char *data, const char *str)
+{
+	return mp_encode_str(data, str, strlen(str));
+}
+
+MP_IMPL char *
+mp_encode_str0_safe(char *data, ptrdiff_t *data_sz, const char *str)
+{
+	return mp_encode_str_safe(data, data_sz, str, strlen(str));
 }
 
 MP_IMPL char *
@@ -2023,11 +2572,33 @@ mp_encode_binl(char *data, uint32_t len)
 }
 
 MP_IMPL char *
+mp_encode_binl_safe(char *data, ptrdiff_t *data_sz, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_binl(len);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_binl(data, len);
+}
+
+MP_IMPL char *
 mp_encode_bin(char *data, const char *str, uint32_t len)
 {
 	data = mp_encode_binl(data, len);
-	memcpy(data, str, len);
-	return data + len;
+	return mp_memcpy(data, str, len);
+}
+
+MP_IMPL char *
+mp_encode_bin_safe(char *data, ptrdiff_t *data_sz,
+		   const char *str, uint32_t len)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_bin(len);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_bin(data, str, len);
 }
 
 MP_IMPL ptrdiff_t
@@ -2162,6 +2733,17 @@ mp_encode_nil(char *data)
 	return mp_store_u8(data, 0xc0);
 }
 
+MP_IMPL char *
+mp_encode_nil_safe(char *data, ptrdiff_t *data_sz)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_nil();
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_nil(data);
+}
+
 MP_IMPL ptrdiff_t
 mp_check_nil(const char *cur, const char *end)
 {
@@ -2191,6 +2773,17 @@ mp_encode_bool(char *data, bool val)
 	return mp_store_u8(data, 0xc2 | (val & 1));
 }
 
+MP_IMPL char *
+mp_encode_bool_safe(char *data, ptrdiff_t *data_sz, bool val)
+{
+	if (data_sz != NULL) {
+		*data_sz -= mp_sizeof_bool(val);
+		if (*data_sz < 0)
+			return data;
+	}
+	return mp_encode_bool(data, val);
+}
+
 MP_IMPL ptrdiff_t
 mp_check_bool(const char *cur, const char *end)
 {
@@ -2214,39 +2807,158 @@ mp_decode_bool(const char **data)
 }
 
 MP_IMPL int
-mp_read_int32(const char **data, int32_t *ret)
+mp_read_int8(const char **data, int8_t *ret)
 {
-	uint32_t uval;
+	int64_t ival;
+	uint64_t uval;
 	const char *p = *data;
 	uint8_t c = mp_load_u8(&p);
 	switch (c) {
 	case 0xd0:
-		*ret = (int8_t) mp_load_u8(&p);
-		break;
+		*ret = (int8_t)mp_load_u8(&p);
+		goto commit;
 	case 0xd1:
-		*ret = (int16_t) mp_load_u16(&p);
-		break;
+		ival = (int16_t)mp_load_u16(&p);
+		goto handle_signed;
 	case 0xd2:
-		*ret = (int32_t) mp_load_u32(&p);
-		break;
+		ival = (int32_t)mp_load_u32(&p);
+		goto handle_signed;
+	case 0xd3:
+		ival = (int64_t)mp_load_u64(&p);
+		goto handle_signed;
 	case 0xcc:
-		*ret = mp_load_u8(&p);
-		break;
+		uval = mp_load_u8(&p);
+		goto handle_unsigned;
 	case 0xcd:
-		*ret = mp_load_u16(&p);
-		break;
+		uval = mp_load_u16(&p);
+		goto handle_unsigned;
 	case 0xce:
 		uval = mp_load_u32(&p);
-		if (mp_unlikely(uval > INT32_MAX))
-			return -1;
-		*ret = uval;
-		break;
+		goto handle_unsigned;
+	case 0xcf:
+		uval = mp_load_u64(&p);
+		goto handle_unsigned;
 	default:
 		if (mp_unlikely(c < 0xe0 && c > 0x7f))
 			return -1;
 		*ret = (int8_t) c;
-		break;
+		goto commit;
 	}
+handle_signed:
+	if (mp_unlikely(ival > INT8_MAX || ival < INT8_MIN))
+		return -1;
+	*ret = (int8_t)ival;
+	goto commit;
+handle_unsigned:
+	if (mp_unlikely(uval > INT8_MAX))
+		return -1;
+	*ret = (int8_t)uval;
+	goto commit;
+commit:
+	*data = p;
+	return 0;
+}
+
+MP_IMPL int
+mp_read_int16(const char **data, int16_t *ret)
+{
+	int64_t ival;
+	uint64_t uval;
+	const char *p = *data;
+	uint8_t c = mp_load_u8(&p);
+	switch (c) {
+	case 0xd0:
+		*ret = (int8_t)mp_load_u8(&p);
+		goto commit;
+	case 0xd1:
+		*ret = (int16_t)mp_load_u16(&p);
+		goto commit;
+	case 0xd2:
+		ival = (int32_t)mp_load_u32(&p);
+		goto handle_signed;
+	case 0xd3:
+		ival = (int64_t)mp_load_u64(&p);
+		goto handle_signed;
+	case 0xcc:
+		*ret = (int16_t)mp_load_u8(&p);
+		goto commit;
+	case 0xcd:
+		uval = mp_load_u16(&p);
+		goto handle_unsigned;
+	case 0xce:
+		uval = mp_load_u32(&p);
+		goto handle_unsigned;
+	case 0xcf:
+		uval = mp_load_u64(&p);
+		goto handle_unsigned;
+	default:
+		if (mp_unlikely(c < 0xe0 && c > 0x7f))
+			return -1;
+		*ret = (int8_t) c;
+		goto commit;
+	}
+handle_signed:
+	if (mp_unlikely(ival > INT16_MAX || ival < INT16_MIN))
+		return -1;
+	*ret = (int16_t)ival;
+	goto commit;
+handle_unsigned:
+	if (mp_unlikely(uval > INT16_MAX))
+		return -1;
+	*ret = (int16_t)uval;
+	goto commit;
+commit:
+	*data = p;
+	return 0;
+}
+
+MP_IMPL int
+mp_read_int32(const char **data, int32_t *ret)
+{
+	int64_t ival;
+	uint64_t uval;
+	const char *p = *data;
+	uint8_t c = mp_load_u8(&p);
+	switch (c) {
+	case 0xd0:
+		*ret = (int8_t)mp_load_u8(&p);
+		goto commit;
+	case 0xd1:
+		*ret = (int16_t)mp_load_u16(&p);
+		goto commit;
+	case 0xd2:
+		*ret = (int32_t)mp_load_u32(&p);
+		goto commit;
+	case 0xd3:
+		ival = (int64_t)mp_load_u64(&p);
+		if (mp_unlikely(ival > INT32_MAX || ival < INT32_MIN))
+			return -1;
+		*ret = (int32_t)ival;
+		goto commit;
+	case 0xcc:
+		*ret = (int32_t)mp_load_u8(&p);
+		goto commit;
+	case 0xcd:
+		*ret = (int32_t)mp_load_u16(&p);
+		goto commit;
+	case 0xce:
+		uval = mp_load_u32(&p);
+		goto handle_unsigned;
+	case 0xcf:
+		uval = mp_load_u64(&p);
+		goto handle_unsigned;
+	default:
+		if (mp_unlikely(c < 0xe0 && c > 0x7f))
+			return -1;
+		*ret = (int8_t) c;
+		goto commit;
+	}
+handle_unsigned:
+	if (mp_unlikely(uval > INT32_MAX))
+		return -1;
+	*ret = (int32_t)uval;
+	goto commit;
+commit:
 	*data = p;
 	return 0;
 }
@@ -2259,31 +2971,31 @@ mp_read_int64(const char **data, int64_t *ret)
 	uint8_t c = mp_load_u8(&p);
 	switch (c) {
 	case 0xd0:
-		*ret = (int8_t) mp_load_u8(&p);
+		*ret = (int8_t)mp_load_u8(&p);
 		break;
 	case 0xd1:
-		*ret = (int16_t) mp_load_u16(&p);
+		*ret = (int16_t)mp_load_u16(&p);
 		break;
 	case 0xd2:
-		*ret = (int32_t) mp_load_u32(&p);
+		*ret = (int32_t)mp_load_u32(&p);
 		break;
 	case 0xd3:
-		*ret = (int64_t) mp_load_u64(&p);
+		*ret = (int64_t)mp_load_u64(&p);
 		break;
 	case 0xcc:
-		*ret = mp_load_u8(&p);
+		*ret = (int64_t)mp_load_u8(&p);
 		break;
 	case 0xcd:
-		*ret = mp_load_u16(&p);
+		*ret = (int64_t)mp_load_u16(&p);
 		break;
 	case 0xce:
-		*ret = mp_load_u32(&p);
+		*ret = (int64_t)mp_load_u32(&p);
 		break;
 	case 0xcf:
 		uval = mp_load_u64(&p);
-		if (uval > INT64_MAX)
+		if (mp_unlikely(uval > INT64_MAX))
 			return -1;
-		*ret = uval;
+		*ret = (int64_t)uval;
 		break;
 	default:
 		if (mp_unlikely(c < 0xe0 && c > 0x7f))
@@ -2295,8 +3007,11 @@ mp_read_int64(const char **data, int64_t *ret)
 	return 0;
 }
 
+MP_PROTO int
+mp_read_double_impl(const char **data, double *ret, bool may_lose_precision);
+
 MP_IMPL int
-mp_read_double(const char **data, double *ret)
+mp_read_double_impl(const char **data, double *ret, bool may_lose_precision)
 {
 	int64_t ival;
 	uint64_t uval;
@@ -2316,7 +3031,7 @@ mp_read_double(const char **data, double *ret)
 	case 0xd3:
 		ival = (int64_t) mp_load_u64(&p);
 		val = (double) ival;
-		if ((int64_t)val != ival)
+		if (!may_lose_precision && (int64_t)val != ival)
 			return -1;
 		*ret = val;
 		break;
@@ -2332,7 +3047,7 @@ mp_read_double(const char **data, double *ret)
 	case 0xcf:
 		uval = mp_load_u64(&p);
 		val = (double)uval;
-		if ((uint64_t)val != uval)
+		if (!may_lose_precision && (uint64_t)val != uval)
 			return -1;
 		*ret = val;
 		break;
@@ -2352,6 +3067,18 @@ mp_read_double(const char **data, double *ret)
 	return 0;
 }
 
+MP_IMPL int
+mp_read_double(const char **data, double *ret)
+{
+	return mp_read_double_impl(data, ret, false);
+}
+
+MP_IMPL int
+mp_read_double_lossy(const char **data, double *ret)
+{
+	return mp_read_double_impl(data, ret, true);
+}
+
 /** See mp_parser_hint */
 enum {
 	MP_HINT = -32,
@@ -2364,7 +3091,8 @@ enum {
 	MP_HINT_MAP_32 = MP_HINT - 6,
 	MP_HINT_EXT_8 = MP_HINT - 7,
 	MP_HINT_EXT_16 = MP_HINT - 8,
-	MP_HINT_EXT_32 = MP_HINT - 9
+	MP_HINT_EXT_32 = MP_HINT - 9,
+	MP_HINT_INVALID = MP_HINT - 10
 };
 
 MP_PROTO void
@@ -2377,6 +3105,46 @@ mp_next_slowpath(const char **data, int64_t k)
 		uint8_t c = mp_load_u8(data);
 		int l = mp_parser_hint[c];
 		if (mp_likely(l >= 0)) {
+			/*
+			 *  Same one-byte-encoded-value optimisation.
+			 *  Good for skipping tons of NILs, zeros etc.
+			 *  Run not more than once per 64 cycles (or about)
+			 * in order to avoid degradation for other cases.
+			 *  Note that l == 0 means that the last byte (that is
+			 * in variable `c`) is one-byte-encoded-value.
+			 *  The idea of optimization is to read the next 8 bytes
+			 * as one 8byte uint and check if all bytes of that
+			 * word are the same value (`c`). If so - skip 8 bytes
+			 * at once and repeat.
+			 *  A small trick is used to create an 8byte uint that
+			 * consists of 8 bytes that equal to one byte (`c`):
+			 * by rules of multiplication if multiply an one-byte
+			 * value (for example 0xab) by 0x0101010101010101 we
+			 * will get 0xabababababababab. That works for any byte.
+			 */
+			if (mp_unlikely(l == 0 && k % 64 == 0)) {
+				/*
+				 * Check k > 8 that there are at least 8 values
+				 * more expected, that are at least 8 bytes of
+				 * total length, that allows us to read 8 bytes.
+				 */
+				while (k > 8) {
+					const char *save = *data;
+					uint64_t u = mp_load_u64(data);
+					/*
+					 * Check that `u` is 8 `c` bytes,
+					 * see the trick explanation above.
+					 */
+					if (u != c * 0x0101010101010101ull) {
+						/* Wrong, restore pointer. */
+						*data = save;
+						break;
+					}
+					/* Confirm reading of 8 values. */
+					k -= 8;
+				}
+				continue;
+			}
 			*data += l;
 			continue;
 		} else if (mp_likely(l > MP_HINT)) {
@@ -2411,11 +3179,11 @@ mp_next_slowpath(const char **data, int64_t k)
 			break;
 		case MP_HINT_MAP_16:
 			/* MP_MAP (16) */
-			k += 2 * mp_load_u16(data);
+			k += 2 * (uint32_t)mp_load_u16(data);
 			break;
 		case MP_HINT_MAP_32:
 			/* MP_MAP (32) */
-			k += 2 * mp_load_u32(data);
+			k += 2 * (uint64_t)mp_load_u32(data);
 			break;
 		case MP_HINT_EXT_8:
 			/* MP_EXT (8) */
@@ -2470,29 +3238,62 @@ mp_next(const char **data)
 MP_IMPL int
 mp_check(const char **data, const char *end)
 {
-#define MP_CHECK_LEN(_l) \
-	if (mp_unlikely((size_t)(end - *data) < (size_t)(_l))) \
-		return 1;
+	const char *begin = *data;
+
+#define MP_CHECK_LEN(_l)						\
+	if (mp_unlikely((size_t)(end - *data) < (size_t)(_l))) {	\
+		struct mp_check_error err;				\
+		err.type = MP_CHECK_ERROR_TRUNC;			\
+		err.data = begin;					\
+		err.end = end;						\
+		err.pos = pos;						\
+		err.trunc_count = k;					\
+		mp_check_on_error(&err);				\
+		return 1;						\
+	}
+
+#define MP_CHECK_EXT(_type, _data, _len)				\
+	if (mp_check_ext_data((_type), (_data), (_len)) != 0) {		\
+		struct mp_check_error err;				\
+		err.type = MP_CHECK_ERROR_EXT;				\
+		err.data = begin;					\
+		err.end = end;						\
+		err.pos = (_data);					\
+		err.ext_type = (_type);					\
+		err.ext_len = (_len);					\
+		mp_check_on_error(&err);				\
+		return 1;						\
+	}
 
 	int64_t k;
 	for (k = 1; k > 0; k--) {
+		const char *pos = *data;
 		MP_CHECK_LEN(1);
 		uint8_t c = mp_load_u8(data);
-
-		if (c == 0xC1)
-			return 1;
-
 		int l = mp_parser_hint[c];
+		uint32_t len;
+		int8_t type;
 		if (mp_likely(l >= 0)) {
 			MP_CHECK_LEN(l);
-			*data += l;
+			if (mp_unlikely(c >= 0xd4 && c <= 0xd8)) {
+				/*
+				 * Check MP_EXT contents. Everything but the
+				 * first byte (which stands for ext type) is the
+				 * payload.
+				 */
+				len = l - 1;
+				type = mp_load_u8(data);
+				MP_CHECK_EXT(type, *data, len);
+				*data += len;
+			} else {
+				*data += l;
+			}
 			continue;
 		} else if (mp_likely(l > MP_HINT)) {
 			k -= l;
 			continue;
 		}
 
-		uint32_t len;
 		switch (l) {
 		case MP_HINT_STR_8:
 			/* MP_STR (8) */
@@ -2528,37 +3329,50 @@ mp_check(const char **data, const char *end)
 		case MP_HINT_MAP_16:
 			/* MP_MAP (16) */
 			MP_CHECK_LEN(sizeof(uint16_t));
-			k += 2 * mp_load_u16(data);
+			k += 2 * (uint32_t)mp_load_u16(data);
 			break;
 		case MP_HINT_MAP_32:
 			/* MP_MAP (32) */
 			MP_CHECK_LEN(sizeof(uint32_t));
-			k += 2 * mp_load_u32(data);
+			k += 2 * (uint64_t)mp_load_u32(data);
 			break;
 		case MP_HINT_EXT_8:
 			/* MP_EXT (8) */
 			MP_CHECK_LEN(sizeof(uint8_t) + sizeof(uint8_t));
 			len = mp_load_u8(data);
-			mp_load_u8(data);
+			type = mp_load_u8(data);
 			MP_CHECK_LEN(len);
+			MP_CHECK_EXT(type, *data, len);
 			*data += len;
 			break;
 		case MP_HINT_EXT_16:
 			/* MP_EXT (16) */
 			MP_CHECK_LEN(sizeof(uint16_t) + sizeof(uint8_t));
 			len = mp_load_u16(data);
-			mp_load_u8(data);
+			type = mp_load_u8(data);
 			MP_CHECK_LEN(len);
+			MP_CHECK_EXT(type, *data, len);
 			*data += len;
 			break;
 		case MP_HINT_EXT_32:
 			/* MP_EXT (32) */
 			MP_CHECK_LEN(sizeof(uint32_t) + sizeof(uint8_t));
 			len = mp_load_u32(data);
-			mp_load_u8(data);
+			type = mp_load_u8(data);
 			MP_CHECK_LEN(len);
+			MP_CHECK_EXT(type, *data, len);
 			*data += len;
 			break;
+		case MP_HINT_INVALID:
+		{
+			struct mp_check_error err;
+			err.type = MP_CHECK_ERROR_ILL;
+			err.data = begin;
+			err.end = end;
+			err.pos = pos;
+			mp_check_on_error(&err);
+			return 1;
+		}
 		default:
 			mp_unreachable();
 		}
@@ -2566,6 +3380,25 @@ mp_check(const char **data, const char *end)
 
 	assert(*data <= end);
 #undef MP_CHECK_LEN
+#undef MP_CHECK_EXT
+	return 0;
+}
+
+MP_IMPL int
+mp_check_exact(const char **data, const char *end)
+{
+	const char *begin = *data;
+	if (mp_check(data, end) != 0)
+		return 1;
+	if (*data != end) {
+		struct mp_check_error err;
+		err.type = MP_CHECK_ERROR_JUNK;
+		err.data = begin;
+		err.end = end;
+		err.pos = *data;
+		mp_check_on_error(&err);
+		return 1;
+	}
 	return 0;
 }
 

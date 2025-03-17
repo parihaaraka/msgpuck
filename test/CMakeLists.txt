@@ -11,10 +11,12 @@ else()
     set(TEST_RUNNER)
 endif()
 
+file(GLOB LIB_FILES ../*.c)
+
 set(alltests)
 foreach (test msgpuck)
-    add_executable(${test}.test ${test}.c test.c)
-    target_link_libraries(${test}.test msgpuck)
+    add_executable(${test}.test ${test}.cc test.c ${LIB_FILES})
+    #target_link_libraries(${test}.test msgpuck)
 
     list(APPEND alltests ${test}.test_run)
     add_custom_target(${test}.test_run

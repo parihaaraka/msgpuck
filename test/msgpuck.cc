@@ -29,7 +29,6 @@
  * THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  */
-
 #include <assert.h>
 #include <string.h>
 #include <stdlib.h>
@@ -37,19 +36,35 @@
 #include <limits.h>
 #include <math.h>
 
+#define UNIT_TAP_COMPATIBLE 1
 #include "msgpuck.h"
 #include "test.h"
 #include "ext_tnt.h"
 
+#include <type_traits>
+
 #define BUF_MAXLEN ((1L << 18) - 1)
 #define STRBIN_MAXLEN (BUF_MAXLEN - 10)
+#define MP_NUMBER_MAX_LEN 16
+#define MP_NUMBER_CODEC_COUNT 16
+
+#ifndef lengthof
+#define lengthof(array) (sizeof(array) / sizeof((array)[0]))
+#endif
+
+#ifndef __has_attribute
+#  define __has_attribute(x) 0
+#endif
+
+#if __has_attribute(noinline) || defined(__GNUC__)
+#  define NOINLINE __attribute__((noinline))
+#else
+#  define NOINLINE
+#endif
 
 static char buf[BUF_MAXLEN + 1];
 static char str[STRBIN_MAXLEN];
 static char *data = buf + 1; /* use unaligned address to fail early */
-
-#define header() note("*** %s ***", __func__)
-#define footer() note("*** %s: done ***", __func__)
 
 #define SCALAR(x) x
 #define COMPLEX(x)
@@ -121,10 +136,91 @@ static char *data = buf + 1; /* use unaligned address to fail early */
 #define test_bin(...)    DEFINE_TEST_STRBINEXT(bin, SCALAR, COMPLEX, __VA_ARGS__)
 #define test_ext(...)	 DEFINE_TEST_STRBINEXT(ext, COMPLEX, SCALAR, __VA_ARGS__)
 
+#define DEFINE_TEST_SAFE(_type, _complex, _ext, _v, _r, _rl) ({		       \
+	note(""#_type"_safe");						       \
+	_ext(int8_t ext_type = 0);					       \
+	ptrdiff_t sz;							       \
+	const char *d;							       \
+	/* Test calculating size. */					       \
+	sz = 0;								       \
+	d = mp_encode_##_type##_safe(NULL, &sz, _ext(ext_type COMMA) (_v));    \
+	is(-sz, (_rl), "size after mp_encode_"#_type"_safe(NULL, &sz)");       \
+	is(d, NULL, "mp_encode_"#_type"_safe(NULL, &sz)");		       \
+	/* Test encoding with no overflow. */				       \
+	sz = _rl;							       \
+	d = mp_encode_##_type##_safe(data, &sz, _ext(ext_type COMMA) (_v));    \
+	is(sz, 0, "size after mp_encode_"#_type"_safe(buf, &sz)");	       \
+	is((d - data), (_rl), "len of mp_encode_"#_type"_safe(buf, &sz)");     \
+	is(memcmp(data, (_r), (_rl)), 0, "mp_encode_"#_type"_safe(buf, &sz)"); \
+	/* Test encoding with with overflow. */				       \
+	sz = _rl - 1;							       \
+	d = mp_encode_##_type##_safe(data, &sz, _ext(ext_type COMMA) (_v));    \
+	is(sz, -1, "size after mp_encode_"#_type"_safe(buf, &sz) overflow");   \
+	is(d, data, "mp_encode_"#_type"_safe(buf, &sz) overflow");	       \
+	/* Test encoding with sz == NULL. */				       \
+	d = mp_encode_##_type##_safe(data, NULL, _ext(ext_type COMMA) (_v));   \
+	is((d - data), (_rl), "len of mp_encode_"#_type"_safe(buf, NULL)");    \
+	is(memcmp(data, (_r), (_rl)), 0, "mp_encode_"#_type"_safe(buf, NULL)");\
+	})
+
+#define DEFINE_TEST_STRBINEXT_SAFE(_type, _not_ext, _ext, _vl) ({	       \
+	note(""#_type"_safe");						       \
+	_ext(int8_t ext_type = 0);					       \
+	ptrdiff_t sz;							       \
+	const ptrdiff_t hl = mp_sizeof_##_type##l(_vl);			       \
+	const ptrdiff_t rl = hl + _vl;					       \
+	char head[5];							       \
+	const char *d;							       \
+	for (uint32_t i = 0; i < _vl; i++) {				       \
+		str[i] = 'a' + i % 26;					       \
+	}								       \
+	mp_encode_##_type##l(head,_ext(ext_type COMMA) _vl);		       \
+	/* Test calculating size. */					       \
+	sz = 0;								       \
+	d = mp_encode_##_type##_safe(NULL, &sz, _ext(ext_type COMMA) str, _vl);\
+	is(-sz, rl, "size after mp_encode_"#_type"_safe(NULL, &sz)");	       \
+	is(d, NULL, "mp_encode_"#_type"_safe(NULL, &sz)");		       \
+	/* Test encoding with no overflow. */				       \
+	sz = rl;							       \
+	d = mp_encode_##_type##_safe(data, &sz, _ext(ext_type COMMA) str, _vl);\
+	is(sz, 0, "size after mp_encode_"#_type"_safe(buf, &sz)");	       \
+	is((d - data), rl, "len of mp_encode_"#_type"_safe(buf, &sz)");	       \
+	is(memcmp(data, head, hl), 0,					       \
+	   "head of mp_encode_"#_type"_safe(buf, &sz)");		       \
+	is(memcmp(data + hl, str, (_vl)), 0,				       \
+	   "payload of mp_encode_"#_type"_safe(buf, &sz)");		       \
+	/* Test encoding with with overflow. */				       \
+	sz = rl - 1;							       \
+	d = mp_encode_##_type##_safe(data, &sz, _ext(ext_type COMMA) str, _vl);\
+	is(sz, -1, "size after mp_encode_"#_type"_safe(buf, &sz) overflow");   \
+	is(d, data, "mp_encode_"#_type"_safe(buf, &sz) overflow");	       \
+	/* Test encoding with sz == NULL. */				       \
+	d = mp_encode_##_type##_safe(data, NULL, _ext(ext_type COMMA)str, _vl);\
+	is((d - data), rl, "len of mp_encode_"#_type"_safe(buf, NULL)");       \
+	is(memcmp(data, head, hl), 0,					       \
+	   "head of mp_encode_"#_type"_safe(buf, NULL)");		       \
+	is(memcmp(data + hl, str, (_vl)), 0,				       \
+	   "payload of mp_encode_"#_type"_safe(buf, NULL)");		       \
+	})
+
+#define test_uint_safe(...)   DEFINE_TEST_SAFE(uint, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_int_safe(...)    DEFINE_TEST_SAFE(int, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_bool_safe(...)   DEFINE_TEST_SAFE(bool, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_float_safe(...)  DEFINE_TEST_SAFE(float, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_double_safe(...) DEFINE_TEST_SAFE(double, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_strl_safe(...)   DEFINE_TEST_SAFE(strl, COMPLEX, COMPLEX, __VA_ARGS__)
+#define test_binl_safe(...)   DEFINE_TEST_SAFE(binl, COMPLEX, COMPLEX, __VA_ARGS__)
+#define test_extl_safe(...)   DEFINE_TEST_SAFE(extl, COMPLEX, SCALAR, __VA_ARGS__)
+#define test_array_safe(...)  DEFINE_TEST_SAFE(array, COMPLEX, COMPLEX, __VA_ARGS__)
+#define test_map_safe(...)    DEFINE_TEST_SAFE(map, COMPLEX, COMPLEX, __VA_ARGS__)
+#define test_str_safe(...)    DEFINE_TEST_STRBINEXT_SAFE(str, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_bin_safe(...)    DEFINE_TEST_STRBINEXT_SAFE(bin, SCALAR, COMPLEX, __VA_ARGS__)
+#define test_ext_safe(...)    DEFINE_TEST_STRBINEXT_SAFE(ext, COMPLEX, SCALAR, __VA_ARGS__)
+
 static int
 test_uints(void)
 {
-	plan(135);
+	plan(15*9 + 9);
 	header();
 
 	test_uint(0U, "\x00", 1);
@@ -150,6 +246,8 @@ test_uints(void)
 	test_uint(0xffffffffffffffffULL,
 	     "\xcf\xff\xff\xff\xff\xff\xff\xff\xff", 9);
 
+	test_uint_safe(0xfffeU, "\xcd\xff\xfe", 3);
+
 	footer();
 	return check_plan();
 }
@@ -157,7 +255,7 @@ test_uints(void)
 static int
 test_ints(void)
 {
-	plan(153);
+	plan(17*9 + 9);
 	header();
 
 	test_int(-0x01, "\xff", 1);
@@ -186,6 +284,8 @@ test_ints(void)
 	test_int((int64_t)-0x8000000000000000LL,
 	     "\xd3\x80\x00\x00\x00\x00\x00\x00\x00", 9);
 
+	test_int_safe(-0x80000000LL, "\xd2\x80\x00\x00\x00", 5);
+
 	footer();
 	return check_plan();
 }
@@ -193,11 +293,13 @@ test_ints(void)
 static int
 test_bools(void)
 {
-	plan(18);
+	plan(2*9 + 9);
 	header();
 
 	test_bool(true, "\xc3", 1);
 	test_bool(false, "\xc2", 1);
+
+	test_bool_safe(true, "\xc3", 1);
 
 	footer();
 	return check_plan();
@@ -206,12 +308,14 @@ test_bools(void)
 static int
 test_floats(void)
 {
-	plan(27);
+	plan(3*9 + 9);
 	header();
 
 	test_float((float) 1.0, "\xca\x3f\x80\x00\x00", 5);
 	test_float((float) 3.141593, "\xca\x40\x49\x0f\xdc", 5);
 	test_float((float) -1e38f, "\xca\xfe\x96\x76\x99", 5);
+
+	test_float_safe((float) 3.141593, "\xca\x40\x49\x0f\xdc", 5);
 
 	footer();
 	return check_plan();
@@ -220,7 +324,7 @@ test_floats(void)
 static int
 test_doubles(void)
 {
-	plan(27);
+	plan(3*9 + 9);
 	header();
 
 	test_double((double) 1.0,
@@ -230,6 +334,9 @@ test_doubles(void)
 	test_double((double) -1e99,
 		    "\xcb\xd4\x7d\x42\xae\xa2\x87\x9f\x2e", 9);
 
+	test_double_safe((double) 3.141592653589793,
+			 "\xcb\x40\x09\x21\xfb\x54\x44\x2d\x18", 9);
+
 	footer();
 	return check_plan();
 }
@@ -237,7 +344,7 @@ test_doubles(void)
 static int
 test_nils(void)
 {
-	plan(6);
+	plan(15);
 	header();
 
 	const char *d1 = mp_encode_nil(data);
@@ -254,6 +361,26 @@ test_nils(void)
 	is(d1, d4, "len(mp_check_nil()) == 1");
 	is(mp_sizeof_nil(), 1, "mp_sizeof_nil() == 1");
 
+	ptrdiff_t sz = 0;
+	d1 = mp_encode_nil_safe(NULL, &sz);
+	is(-sz, 1, "size after mp_encode_nil_safe(NULL, &sz)");
+	is(d1, NULL, "mp_encode_nil_safe(NULL, &sz)");
+
+	sz = 1;
+	d1 = mp_encode_nil_safe(data, &sz);
+	is(sz, 0, "size after mp_encode_nil_safe(buf, &sz)");
+	is(d1 - data, 1, "len of mp_encode_nil_safe(buf, &sz)");
+	is((unsigned char)data[0], 0xc0, "mp_encode_nil_safe(buf, &sz)");
+
+	sz = 0;
+	d1 = mp_encode_nil_safe(data, &sz);
+	is(sz, -1, "size after mp_encode_nil_safe(buf, &sz) overflow");
+	is(d1, data, "mp_encode_nil_safe(buf, &sz) overflow");
+
+	d1 = mp_encode_nil_safe(data, NULL);
+	is(d1 - data, 1, "len of mp_encode_nil_safe(buf, NULL)");
+	is((unsigned char)data[0], 0xc0, "mp_encode_nil_safe(buf, NULL)");
+
 	footer();
 	return check_plan();
 }
@@ -261,7 +388,7 @@ test_nils(void)
 static int
 test_arrays(void)
 {
-	plan(54);
+	plan(9*6 + 9);
 	header();
 
 	test_array(0, "\x90", 1);
@@ -274,6 +401,8 @@ test_arrays(void)
 	test_array(0xfffffffeU, "\xdd\xff\xff\xff\xfe", 5);
 	test_array(0xffffffffU, "\xdd\xff\xff\xff\xff", 5);
 
+	test_array_safe(0xffff, "\xdc\xff\xff", 3);
+
 	footer();
 	return check_plan();
 }
@@ -281,7 +410,7 @@ test_arrays(void)
 static int
 test_maps(void)
 {
-	plan(54);
+	plan(9*6 + 9);
 	header();
 
 	test_map(0, "\x80", 1);
@@ -294,6 +423,8 @@ test_maps(void)
 	test_map(0xfffffffeU, "\xdf\xff\xff\xff\xfe", 5);
 	test_map(0xffffffffU, "\xdf\xff\xff\xff\xff", 5);
 
+	test_map_safe(0xfffffffeU, "\xdf\xff\xff\xff\xfe", 5);
+
 	footer();
 	return check_plan();
 }
@@ -301,7 +432,7 @@ test_maps(void)
 static int
 test_strls(void)
 {
-	plan(78);
+	plan(13*6 + 9);
 	header();
 
 	test_strl(0x00U, "\xa0", 1);
@@ -321,6 +452,8 @@ test_strls(void)
 	test_strl(0xfffffffeU, "\xdb\xff\xff\xff\xfe", 5);
 	test_strl(0xffffffffU, "\xdb\xff\xff\xff\xff", 5);
 
+	test_strl_safe(0x20U, "\xd9\x20", 2);
+
 	footer();
 	return check_plan();
 }
@@ -328,7 +461,7 @@ test_strls(void)
 static int
 test_binls(void)
 {
-	plan(78);
+	plan(13*6 + 9);
 	header();
 
 	test_binl(0x00U, "\xc4\x00", 2);
@@ -348,6 +481,8 @@ test_binls(void)
 	test_binl(0xfffffffeU, "\xc6\xff\xff\xff\xfe", 5);
 	test_binl(0xffffffffU, "\xc6\xff\xff\xff\xff", 5);
 
+	test_binl_safe(0x00010000U, "\xc6\x00\x01\x00\x00", 5);
+
 	footer();
 	return check_plan();
 }
@@ -355,7 +490,7 @@ test_binls(void)
 static int
 test_extls(void)
 {
-	plan(168);
+	plan(28*6 + 9);
 	header();
 
 	/* fixext 1,2,4,8,16 */
@@ -395,6 +530,8 @@ test_extls(void)
 	test_extl(0xfffffffeU, "\xc9\xff\xff\xff\xfe\x00", 6);
 	test_extl(0xffffffffU, "\xc9\xff\xff\xff\xff\x00", 6);
 
+	test_extl_safe(0x0aU, "\xc7\x0a\x00", 3);
+
 	footer();
 	return check_plan();
 }
@@ -402,7 +539,7 @@ test_extls(void)
 static int
 test_strs(void)
 {
-	plan(96);
+	plan(12*8 + 11);
 	header();
 
 	test_str(0x01);
@@ -418,6 +555,8 @@ test_strs(void)
 	test_str(0x10000);
 	test_str(0x10001);
 
+	test_str_safe(0xfffe);
+
 	footer();
 	return check_plan();
 }
@@ -425,7 +564,7 @@ test_strs(void)
 static int
 test_bins(void)
 {
-	plan(96);
+	plan(12*8 + 11);
 	header();
 
 	test_bin(0x01);
@@ -441,6 +580,8 @@ test_bins(void)
 	test_bin(0x10000);
 	test_bin(0x10001);
 
+	test_bin_safe(0x10001);
+
 	footer();
 	return check_plan();
 }
@@ -448,7 +589,7 @@ test_bins(void)
 static int
 test_exts(void)
 {
-	plan(225);
+	plan(25*9 + 11);
 	header();
 
 	test_ext(0x01);
@@ -479,6 +620,48 @@ test_exts(void)
 
 	test_ext(0x00010000);
 	test_ext(0x00010001);
+
+	test_ext_safe(0xfe);
+
+	footer();
+	return check_plan();
+}
+
+static int
+test_memcpy()
+{
+	plan(11);
+	header();
+
+	int len = 27;
+	char *d;
+
+	for (int i = 0; i < len; i++)
+		str[i] = 'a' + i % 26;
+
+	d = mp_memcpy(data, str, len);
+	is(d - data, len, "len of mp_memcpy()");
+	is(memcmp(data, str, len), 0, "payload of mp_memcpy()");
+
+	ptrdiff_t sz = 0;
+	d = mp_memcpy_safe(NULL, &sz, str, len);
+	is(-sz, len, "size after mp_memcpy_safe(NULL, &sz)");
+	is(d, NULL, "mp_memcpy_safe(NULL, &sz)");
+
+	sz = len;
+	d = mp_memcpy_safe(data, &sz, str, len);
+	is(sz, 0, "size after mp_memcpy_safe(buf, &sz)");
+	is(d - data, len, "len of mp_memcpy_safe(buf, &sz)");
+	is(memcmp(data, str, len), 0, "mp_memcpy_safe(buf, &sz)");
+
+	sz = len - 1;
+	d = mp_memcpy_safe(data, &sz, str, len);
+	is(sz, -1, "size after mp_memcpy_safe(buf, &sz) overflow");
+	is(d, data, "mp_memcpy_safe(buf, &sz) overflow");
+
+	d = mp_memcpy_safe(data, NULL, str, len);
+	is(d - data, len, "len of (buf, NULL)");
+	is(memcmp(data, str, len), 0, "mp_memcpy_safe(buf, NULL)");
 
 	footer();
 	return check_plan();
@@ -570,38 +753,157 @@ test_next_on_maps(void)
 	return check_plan();
 }
 
+/**
+ * When inlined in Release in clang, this function behaves weird. Looking
+ * sometimes like if its call had no effect even though it did encoding.
+ */
+static NOINLINE bool
+test_encode_uint_custom_size(char *buf, uint64_t val, int size)
+{
+	char *pos;
+	switch (size) {
+	case 1:
+		if (val > 0x7f)
+			return false;
+		mp_store_u8(buf, val);
+		return true;
+	case 2:
+		if (val > UINT8_MAX)
+			return false;
+		pos = mp_store_u8(buf, 0xcc);
+		mp_store_u8(pos, (uint8_t)val);
+		return true;
+	case 3:
+		if (val > UINT16_MAX)
+			return false;
+		pos = mp_store_u8(buf, 0xcd);
+		mp_store_u16(pos, (uint16_t)val);
+		return true;
+	case 5:
+		if (val > UINT32_MAX)
+			return false;
+		pos = mp_store_u8(buf, 0xce);
+		mp_store_u32(pos, (uint32_t)val);
+		return true;
+	case 9:
+		pos = mp_store_u8(buf, 0xcf);
+		mp_store_u64(pos, val);
+		return true;
+	}
+	abort();
+	return false;
+}
+
+/**
+ * Unlike test_encode_uint_custom_size(), this one doesn't seem to behave
+ * strange when inlined, but perhaps it just wasn't used in all the same ways as
+ * the former.
+ */
+static NOINLINE bool
+test_encode_int_custom_size(char *buf, int64_t val, int size)
+{
+	char *pos;
+	switch (size) {
+	case 1:
+		if (val > 0x7f || val < -0x20)
+			return false;
+		if (val >= 0)
+			mp_store_u8(buf, val);
+		else
+			mp_store_u8(buf, (uint8_t)(0xe0 | val));
+		return true;
+	case 2:
+		if (val < INT8_MIN || val > INT8_MAX)
+			return false;
+		pos = mp_store_u8(buf, 0xd0);
+		mp_store_u8(pos, (uint8_t)val);
+		return true;
+	case 3:
+		if (val < INT16_MIN || val > INT16_MAX)
+			return false;
+		pos = mp_store_u8(buf, 0xd1);
+		mp_store_u16(pos, (uint16_t)val);
+		return true;
+	case 5:
+		if (val < INT32_MIN || val > INT32_MAX)
+			return false;
+		pos = mp_store_u8(buf, 0xd2);
+		mp_store_u32(pos, (uint32_t)val);
+		return true;
+	case 9:
+		pos = mp_store_u8(buf, 0xd3);
+		mp_store_u64(pos, val);
+		return true;
+	}
+	abort();
+	return false;
+}
+
+static int
+test_encode_uint_all_sizes(char mp_nums[][MP_NUMBER_MAX_LEN], uint64_t val)
+{
+	int sizes[] = {1, 2, 3, 5, 9};
+	int count = lengthof(sizes);
+	int used = 0;
+	for (int i = 0; i < count; ++i) {
+		assert(used < MP_NUMBER_CODEC_COUNT);
+		if (test_encode_uint_custom_size(mp_nums[used], val, sizes[i]))
+			++used;
+	}
+	return used;
+}
+
+static int
+test_encode_int_all_sizes(char mp_nums[][MP_NUMBER_MAX_LEN], int64_t val)
+{
+	int sizes[] = {1, 2, 3, 5, 9};
+	int count = lengthof(sizes);
+	int used = 0;
+	for (int i = 0; i < count; ++i) {
+		assert(used < MP_NUMBER_CODEC_COUNT);
+		if (test_encode_int_custom_size(mp_nums[used], val, sizes[i]))
+			++used;
+	}
+	return used;
+}
+
 static void
 test_compare_uint(uint64_t a, uint64_t b)
 {
-	char bufa[9];
-	char bufb[9];
-	mp_encode_uint(bufa, a);
-	mp_encode_uint(bufb, b);
-	int r = mp_compare_uint(bufa, bufb);
-	if (a < b) {
-		ok(r < 0, "mp_compare_uint(%"PRIu64", %" PRIu64 ") < 0", a, b);
-	} else if (a > b) {
-		ok(r > 0, "mp_compare_uint(%"PRIu64", %" PRIu64") > 0", a, b);
-	} else {
-		ok(r == 0, "mp_compare_uint(%"PRIu64", %"PRIu64") == 0", a, b);
+	char mp_nums_a[MP_NUMBER_CODEC_COUNT][MP_NUMBER_MAX_LEN];
+	int count_a = test_encode_uint_all_sizes(mp_nums_a, a);
+
+	char mp_nums_b[MP_NUMBER_CODEC_COUNT][MP_NUMBER_MAX_LEN];
+	int count_b = test_encode_uint_all_sizes(mp_nums_b, b);
+
+	for (int ai = 0; ai < count_a; ++ai) {
+		for (int bi = 0; bi < count_b; ++bi) {
+			int r = mp_compare_uint(mp_nums_a[ai], mp_nums_b[bi]);
+			if (a < b) {
+				ok(r < 0, "mp_compare_uint(%" PRIu64 ", "
+				   "%" PRIu64 ") < 0", a, b);
+			} else if (a > b) {
+				ok(r > 0, "mp_compare_uint(%" PRIu64 ", "
+				   "%" PRIu64 ") > 0", a, b);
+			} else {
+				ok(r == 0, "mp_compare_uint(%" PRIu64 ", "
+				   "%" PRIu64 ") == 0", a, b);
+			}
+		}
 	}
 }
 
 static int
 test_compare_uints(void)
 {
-	plan(227);
+	plan(2209);
 	header();
-
-	test_compare_uint(0, 0);
-	test_compare_uint(0, 0);
 
 	uint64_t nums[] = {
 		0, 1, 0x7eU, 0x7fU, 0x80U, 0xfeU, 0xffU, 0xfffeU, 0xffffU,
 		0x10000U, 0xfffffffeU, 0xffffffffU, 0x100000000ULL,
 		0xfffffffffffffffeULL, 0xffffffffffffffffULL
 	};
-
 	int count = sizeof(nums) / sizeof(*nums);
 	for (int i = 0; i < count; i++) {
 		for (int j = 0; j < count; j++) {
@@ -869,7 +1171,7 @@ test_mp_print()
 	d = mp_encode_array(d, 8);
 	d = mp_encode_int(d, -5);
 	d = mp_encode_uint(d, 42);
-	d = mp_encode_str(d, "kill bill", 9);
+	d = mp_encode_str(d, "kill/bill", 9);
 	d = mp_encode_array(d, 0);
 	d = mp_encode_map(d, 6);
 	d = mp_encode_str(d, "bool true", 9);
@@ -894,7 +1196,7 @@ test_mp_print()
 	assert(d <= msgpack + sizeof(msgpack));
 
 	const char *expected =
-		"[-5, 42, \"kill bill\", [], "
+		"[-5, 42, \"kill/bill\", [], "
 		"{\"bool true\": true, \"bool false\": false, \"null\": null, "
 		"\"float\": 3.1400001, \"double\": 3.1400000000000001, 100: 500}, "
 		"(extension: type 123, len 3), "
@@ -943,9 +1245,9 @@ test_mp_print()
 	int mp_buff_sz = (MP_PRINT_MAX_DEPTH + 1) * mp_sizeof_array(1) +
 			 mp_sizeof_uint(1);
 	int exp_str_sz = 2 * (MP_PRINT_MAX_DEPTH + 1) + 3 + 1;
-	char *mp_buff = malloc(mp_buff_sz);
-	char *exp_str = malloc(exp_str_sz);
-	char *decoded = malloc(exp_str_sz);
+	char *mp_buff = (char *)malloc(mp_buff_sz);
+	char *exp_str = (char *)malloc(exp_str_sz);
+	char *decoded = (char *)malloc(exp_str_sz);
 	char *buff_wptr = mp_buff;
 	char *exp_str_wptr = exp_str;
 	for (int i = 0; i <= 2 * (MP_PRINT_MAX_DEPTH + 1); i++) {
@@ -1117,15 +1419,13 @@ test_mp_print_ext_tnt(void)
 int
 test_mp_check()
 {
-	plan(66);
+	plan(71);
 	header();
 
 #define invalid(data, fmt, ...) ({ \
 	const char *p = data; \
 	isnt(mp_check(&p, p + sizeof(data) - 1), 0, fmt, ## __VA_ARGS__); \
-});
-
-	invalid("\xc1", "invalid header 0xc1");
+})
 
 	/* fixmap */
 	invalid("\x81", "invalid fixmap 1");
@@ -1248,85 +1548,514 @@ test_mp_check()
 	/* map16 */
 	invalid("\xde", "invalid map16 1");
 	invalid("\xde\x00\x01", "invalid map16 2");
-	invalid("\xde\x00\x01\x5", "invalid map16 2");
+	invalid("\xde\x00\x01\x5", "invalid map16 3");
+	invalid("\xde\x80\x00", "invalid map16 4");
 
 	/* map32 */
 	invalid("\xdf", "invalid map32 1");
 	invalid("\xdf\x00\x00\x00\x01", "invalid map32 2");
 	invalid("\xdf\x00\x00\x00\x01\x5", "invalid map32 3");
+	invalid("\xdf\x80\x00\x00\x00", "invalid map32 4");
+
+	/* 0xc1 is never used */
+	invalid("\xc1", "invalid header 1");
+	invalid("\x91\xc1", "invalid header 2");
+	invalid("\x93\xff\xc1\xff", "invalid header 3");
+	invalid("\x82\xff\xc1\xff\xff", "invalid header 4");
+
+#undef invalid
 
 	footer();
 
 	return check_plan();
 }
 
-#define int_eq(a, b) (((a) - (b)) == 0)
-#define double_eq(a, b) (fabs((a) - (b)) < 1e-15)
-
-#define test_read_number(_func, _eq,  _type, _mp_type, _val, _success) do {	\
-	const char *s = #_func "(mp_encode_" #_mp_type "(" #_val "))";	\
-	const char *d1 = data;						\
-	const char *d2 = mp_encode_##_mp_type(data, _val);		\
-	_type v;							\
-	int ret = _func(&d1, &v);					\
-	if (_success) {							\
-		is(ret, 0, "%s check success", s);			\
-		is(d1, d2, "%s check pos advanced", s);			\
-		ok(_eq(v, _val), "%s check result", s);		\
-	} else {							\
-		is(ret, -1, "%s check fail", s);			\
-		is(d1, data, "%s check pos unchanged", s);		\
-	}								\
-} while (0)
-
-#define test_read_int32(...)	test_read_number(mp_read_int32, int_eq, int32_t, __VA_ARGS__)
-#define test_read_int64(...)	test_read_number(mp_read_int64, int_eq, int64_t, __VA_ARGS__)
-#define test_read_double(...)	test_read_number(mp_read_double, double_eq, double, __VA_ARGS__)
-
 static int
-test_numbers()
+test_mp_check_exact(void)
 {
-	plan(96);
+	plan(11);
 	header();
 
-	test_read_int32(uint, 123, true);
-	test_read_int32(uint, 12345, true);
-	test_read_int32(uint, 2147483647, true);
-	test_read_int32(uint, 2147483648, false);
-	test_read_int32(int, -123, true);
-	test_read_int32(int, -12345, true);
-	test_read_int32(int, -2147483648, true);
-	test_read_int32(int, -2147483649LL, false);
-	test_read_int32(float, -1e2, false);
-	test_read_int32(double, 1.2345, false);
-	test_read_int32(map, 5, false);
+#define invalid(data, fmt, ...) ({ \
+	const char *p = data; \
+	isnt(mp_check_exact(&p, p + sizeof(data) - 1), 0, fmt, ## __VA_ARGS__); \
+})
+#define valid(data, fmt, ...) ({ \
+	const char *p = data; \
+	is(mp_check_exact(&p, p + sizeof(data) - 1), 0, fmt, ## __VA_ARGS__); \
+})
 
-	test_read_int64(uint, 123, true);
-	test_read_int64(uint, 12345, true);
-	test_read_int64(uint, 123456789, true);
-	test_read_int64(uint, 9223372036854775807ULL, true);
-	test_read_int64(uint, 9223372036854775808ULL, false);
-	test_read_int64(int, -123, true);
-	test_read_int64(int, -12345, true);
-	test_read_int64(int, -123456789, true);
-	test_read_int64(int, -9223372036854775807LL, true);
-	test_read_int64(float, 100, false);
-	test_read_int64(double, -5.4321, false);
-	test_read_int64(array, 10, false);
+	invalid("", "empty");
+	invalid("\x92\xc0\xc1", "ill");
 
-	test_read_double(uint, 123, true);
-	test_read_double(uint, 12345, true);
-	test_read_double(uint, 123456789, true);
-	test_read_double(uint, 1234567890000ULL, true);
-	test_read_double(uint, 123456789123456789ULL, false);
-	test_read_double(int, -123, true);
-	test_read_double(int, -12345, true);
-	test_read_double(int, -123456789, true);
-	test_read_double(int, -1234567890000LL, true);
-	test_read_double(int, -123456789123456789LL, false);
-	test_read_double(float, 6.565e6, true);
-	test_read_double(double, -5.555, true);
-	test_read_double(strl, 100, false);
+	invalid("\x92", "trunc 1");
+	invalid("\x92\xc0", "trunc 2");
+	invalid("\x93\xc0\xc0", "trunc 3");
+
+	invalid("\xc0\xc0", "junk 1");
+	invalid("\x92\xc0\xc0\xc0", "junk 2");
+	invalid("\x92\xc0\x91\xc0\xc0", "junk 3");
+
+	valid("\xc0", "valid 1");
+	valid("\x91\xc0", "valid 2");
+	valid("\x92\xc0\x91\xc0", "valid 3");
+
+#undef valid
+#undef invalid
+
+	footer();
+	return check_plan();
+}
+
+/**
+ * Check validity of a simple extension type.
+ * Its type is 0x42 and payload is a byte string where i-th byte value is its
+ * position from the end of the string.
+ */
+int
+mp_check_ext_data_test(int8_t type, const char *data, uint32_t len)
+{
+	if (type != 0x42)
+		return 1;
+	for (uint32_t i = 0; i < len; i++) {
+		if ((unsigned char)data[i] != len - i)
+			return 1;
+	}
+	return 0;
+}
+
+int
+test_mp_check_ext_data()
+{
+	plan(24);
+	header();
+
+#define invalid(data, fmt, ...) ({ \
+	const char *p = data; \
+	isnt(mp_check(&p, p + sizeof(data) - 1), 0, fmt, ## __VA_ARGS__); \
+})
+#define valid(data, fmt, ...) ({ \
+	const char *p = data; \
+	is(mp_check(&p, p + sizeof(data) - 1), 0, fmt, ## __VA_ARGS__); \
+})
+
+	mp_check_ext_data_f mp_check_ext_data_svp = mp_check_ext_data;
+	mp_check_ext_data = mp_check_ext_data_test;
+
+	/* ext8 */
+	invalid("\xc7\x00\x13", "invalid ext8 - bad type");
+	invalid("\xc7\x01\x42\x13", "invalid ext8 - bad data");
+	valid("\xc7\x01\x42\x01", "valid ext8");
+
+	/* ext16 */
+	invalid("\xc8\x00\x00\x13", "invalid ext16 - bad type");
+	invalid("\xc8\x00\x01\x42\x13", "invalid ext16 - bad data");
+	valid("\xc8\x00\x01\x42\x01", "valid ext16");
+
+	/* ext32 */
+	invalid("\xc9\x00\x00\x00\x00\x13", "invalid ext32 - bad type");
+	invalid("\xc9\x00\x00\x00\x01\x42\x13", "invalid ext32 - bad data");
+	valid("\xc9\x00\x00\x00\x01\x42\x01", "valid ext32");
+
+	/* fixext8 */
+	invalid("\xd4\x13\x01", "invalid fixext8 - bad type");
+	invalid("\xd4\x42\x13", "invalid fixext8 - bad data");
+	valid("\xd4\x42\x01", "valid fixext8");
+
+	/* fixext16 */
+	invalid("\xd5\x13\x02\x01", "invalid fixext16 - bad type");
+	invalid("\xd5\x42\x13\x13", "invalid fixext16 - bad data");
+	valid("\xd5\x42\x02\x01", "valid fixext16");
+
+	/* fixext32 */
+	invalid("\xd6\x13\x04\x03\x02\x01", "invalid fixext32 - bad type");
+	invalid("\xd6\x42\x13\x13\x13\x13", "invalid fixext32 - bad data");
+	valid("\xd6\x42\x04\x03\x02\x01", "valid fixext32");
+
+	/* fixext64 */
+	invalid("\xd7\x13\x08\x07\x06\x05\x04\x03\x02\x01",
+		"invalid fixext64 - bad type");
+	invalid("\xd7\x42\x13\x13\x13\x13\x13\x13\x13\x13",
+		"invalid fixext64 - bad data");
+	valid("\xd7\x42\x08\x07\x06\x05\x04\x03\x02\x01",
+	      "valid fixext64");
+
+	/* fixext128 */
+	invalid("\xd8\x13\x10\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04"
+		"\x03\x02\x01", "invalid fixext128 - bad type");
+	invalid("\xd8\x42\x13\x13\x13\x13\x13\x13\x13\x13\x13\x13\x13\x13\x13"
+		"\x13\x13\x13", "invalid fixext128 - bad data");
+	valid("\xd8\x42\x10\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04"
+	      "\x03\x02\x01", "valid fixext128");
+
+	mp_check_ext_data = mp_check_ext_data_svp;
+
+#undef valid
+#undef invalid
+
+	footer();
+	return check_plan();
+}
+
+static struct mp_check_error last_error;
+
+static void
+mp_check_on_error_test(const struct mp_check_error *err)
+{
+	last_error = *err;
+}
+
+static int
+test_mp_check_error(void)
+{
+	const int trunc_error_count = 30;
+	const int ill_error_count = 3;
+	const int ext_error_count = 4;
+	const int junk_error_count = 3;
+	plan(6 * trunc_error_count +
+	     5 * ill_error_count +
+	     7 * ext_error_count +
+	     5 * junk_error_count);
+	header();
+
+	mp_check_ext_data_f mp_check_ext_data_svp = mp_check_ext_data;
+	mp_check_ext_data = mp_check_ext_data_test;
+	mp_check_on_error_f mp_check_on_error_svp = mp_check_on_error;
+	mp_check_on_error = mp_check_on_error_test;
+
+#define check_error(check_, data_, offset_, type_, trunc_count_,	\
+		    ext_type_, ext_len_, msg_)				\
+	do {			\
+		const char *data = data_;				\
+		const char *end = data + sizeof(data_) - 1;		\
+		const char *p = data;					\
+		isnt(check_(&p, end), 0, msg_);				\
+		is(last_error.type, type_, msg_ " - error type");	\
+		is(last_error.data, data, msg_ " - error data");	\
+		is(last_error.end, end, msg_ " - error data end");	\
+		is(last_error.pos - last_error.data, (ptrdiff_t)offset_,\
+		   msg_ " - error data pos");				\
+		if (last_error.type == MP_CHECK_ERROR_TRUNC) {		\
+			is(last_error.trunc_count, trunc_count_,	\
+			   msg_ " - error trunc count");		\
+		}							\
+		if (last_error.type == MP_CHECK_ERROR_EXT) {		\
+			is(last_error.ext_type, ext_type_,		\
+			   msg_ " - error ext type");			\
+			is(last_error.ext_len, ext_len_,		\
+			   msg_ " - error ext len");			\
+		}							\
+	} while (0)
+
+#define check_error_trunc(data_, offset_, trunc_count_, msg_)		\
+	check_error(mp_check, data_, offset_, MP_CHECK_ERROR_TRUNC,	\
+		    trunc_count_, 0, 0, msg_)
+
+#define check_error_ill(data_, offset_, msg_)				\
+	check_error(mp_check, data_, offset_, MP_CHECK_ERROR_ILL,	\
+		    0, 0, 0, msg_)
+
+#define check_error_ext(data_, offset_, ext_type_, ext_len_, msg_)	\
+	check_error(mp_check, data_, offset_, MP_CHECK_ERROR_EXT,	\
+		    0, ext_type_, ext_len_, msg_)
+
+#define check_error_junk(data_, offset_, msg_)				\
+	check_error(mp_check_exact, data_, offset_, MP_CHECK_ERROR_JUNK,\
+		    0, 0, 0, msg_)
+
+	check_error_trunc("", 0, 1, "empty");
+
+	check_error_trunc("\xa2", 0, 1, "trunc fixstr");
+	check_error_trunc("\xd9", 0, 1, "trunc str8 header");
+	check_error_trunc("\xd9\x10", 0, 1, "trunc str8 data");
+	check_error_trunc("\xda\x00", 0, 1, "trunc str16 header");
+	check_error_trunc("\xda\x00\x10", 0, 1, "trunc str16 data");
+	check_error_trunc("\xdb\x00\x00\x00", 0, 1, "trunc str32 header");
+	check_error_trunc("\xdb\x00\x00\x00\x10", 0, 1, "trunc str32 data");
+
+	check_error_trunc("\x92", 1, 2, "trunc fixarray");
+	check_error_trunc("\xdc\x00", 0, 1, "trunc array16 header");
+	check_error_trunc("\xdc\x00\x10", 3, 16, "trunc array16 data");
+	check_error_trunc("\xdd\x00\x00\x00", 0, 1, "trunc array32 header");
+	check_error_trunc("\xdd\x00\x00\x00\x10", 5, 16, "trunc array32 data");
+
+	check_error_trunc("\x82", 1, 4, "trunc fixmap");
+	check_error_trunc("\xde\x00", 0, 1, "trunc map16 header");
+	check_error_trunc("\xde\x00\x10", 3, 32, "trunc map16 data");
+	check_error_trunc("\xdf\x00\x00\x00", 0, 1, "trunc map32 header");
+	check_error_trunc("\xdf\x00\x00\x00\x10", 5, 32, "trunc map32 data");
+
+	check_error_trunc("\xd4", 0, 1, "trunc fixext header");
+	check_error_trunc("\xd4\x42", 0, 1, "trunc fixext data");
+	check_error_trunc("\xc7\x10", 0, 1, "trunc ext8 header");
+	check_error_trunc("\xc7\x10\x42", 0, 1, "trunc ext8 data");
+	check_error_trunc("\xc8\x00\x10", 0, 1, "trunc ext16 header");
+	check_error_trunc("\xc8\x00\x10\x42", 0, 1, "trunc ext16 data");
+	check_error_trunc("\xc9\x00\x00\x00\x10", 0, 1, "trunc ext32 header");
+	check_error_trunc("\xc9\x00\x00\x00\x10\x42", 0, 1, "trunc ext32 data");
+
+	check_error_trunc("\x92\x82", 2, 5, "trunc nested 1");
+	check_error_trunc("\x92\x82\xc0", 3, 4, "trunc nested 2");
+	check_error_trunc("\x92\x82\xc0\x92", 4, 5, "trunc nested 3");
+	check_error_trunc("\x92\x82\xc0\x92\x82", 5, 8, "trunc nested 4");
+
+	check_error_ill("\xc1", 0, "ill 1");
+	check_error_ill("\x92\xc1", 1, "ill 2");
+	check_error_ill("\x92\xc0\xc1", 2, "ill 3");
+
+	check_error_ext("\xd4\x42\x00", 2, 0x42, 1, "bad fixext");
+	check_error_ext("\xc7\x01\x42\x00", 3, 0x42, 1, "bad ext8");
+	check_error_ext("\xc8\x00\x01\x42\x00", 4, 0x42, 1, "bad ext16");
+	check_error_ext("\xc9\x00\x00\x00\x01\x42\x00", 6, 0x42, 1, "bad ext32");
+
+	check_error_junk("\xc0\xc0", 1, "junk 1");
+	check_error_junk("\xc0\x91\xc1", 1, "junk 2");
+	check_error_junk("\x92\xc0\xc0\xc0", 3, "junk 3");
+
+#undef check_error_junk
+#undef check_error_ext
+#undef check_error_ill
+#undef check_error_trunc
+#undef check_error
+
+	mp_check_ext_data = mp_check_ext_data_svp;
+	mp_check_on_error = mp_check_on_error_svp;
+
+	footer();
+	return check_plan();
+}
+
+#define double_eq(a, b) (fabs((a) - (b)) < 1e-15)
+
+template<typename TargetT, typename ValueT, typename ReadF>
+static void
+test_read_num(ValueT num1, ReadF read_f, bool is_ok)
+{
+	/*
+	 * Build the header message.
+	 */
+	const int str_cap = 256;
+	char str[str_cap];
+	char *end = str + str_cap;
+	char *pos = str + snprintf(str, str_cap, "typed read of ");
+	if (std::is_same<ValueT, float>::value)
+		pos += snprintf(pos, end - pos, "%f", (float)num1);
+	else if (std::is_same<ValueT, double>::value)
+		pos += snprintf(pos, end - pos, "%lf", (double)num1);
+	else if (num1 >= 0)
+		pos += snprintf(pos, end - pos, "%llu", (long long)num1);
+	else
+		pos += snprintf(pos, end - pos, "%lld", (long long)num1);
+	pos += snprintf(pos, end - pos, " into ");
+
+	static_assert(!std::is_same<TargetT, float>::value,
+		      "no float reading");
+	if (std::is_integral<TargetT>::value) {
+		pos += snprintf(pos, end - pos, "int%zu_t",
+				sizeof(TargetT) * 8);
+	} else {
+		pos += snprintf(pos, end - pos, "double");
+	}
+	note("%s", str);
+	/*
+	 * Perform the actual tests.
+	 */
+	char mp_nums[MP_NUMBER_CODEC_COUNT][MP_NUMBER_MAX_LEN];
+	int count = 0;
+	if (std::is_integral<ValueT>::value) {
+		if (num1 >= 0) {
+			count += test_encode_uint_all_sizes(
+				&mp_nums[count], num1);
+		}
+		if (num1 <= INT64_MAX) {
+			count += test_encode_int_all_sizes(
+				&mp_nums[count], num1);
+		}
+	} else if (!std::is_integral<TargetT>::value || !is_ok) {
+		/*
+		 * Only encode floating point types when
+		 * 1) expect to also decode them back successfully.
+		 * 2) want to fail to decode an integer.
+		 *
+		 * Encoding integers as floats for decoding them back into
+		 * integers won't work.
+		 */
+		if (std::is_same<ValueT, float>::value)
+			mp_encode_float(mp_nums[count++], (float)num1);
+		mp_encode_double(mp_nums[count++], (double)num1);
+	}
+	for (int i = 0; i < count; ++i) {
+		const char *mp_num_pos1 = mp_nums[i];
+		char code = *mp_num_pos1;
+		/* Sanity check of the test encoding. */
+		if (mp_typeof(*mp_num_pos1) == MP_INT) {
+			fail_unless(mp_decode_int(&mp_num_pos1) ==
+				    (int64_t)num1);
+		} else if (mp_typeof(*mp_num_pos1) == MP_UINT) {
+			fail_unless(mp_decode_uint(&mp_num_pos1) ==
+				    (uint64_t)num1);
+		} else if (mp_typeof(*mp_num_pos1) == MP_FLOAT) {
+			fail_unless(mp_decode_float(&mp_num_pos1) ==
+				    (float)num1);
+		} else {
+			fail_unless(mp_decode_double(&mp_num_pos1) ==
+				    (double)num1);
+		}
+
+		const char *mp_num_pos2 = mp_nums[i];
+		TargetT num2 = 0;
+		int rc = read_f(&mp_num_pos2, &num2);
+		if (!is_ok) {
+			is(rc, -1, "check failure for code 0x%02X", code);
+			is(mp_num_pos2, mp_nums[i], "check position");
+			continue;
+		}
+		is(rc, 0, "check success for code 0x%02X", code);
+		is(mp_num_pos1, mp_num_pos2, "check position");
+		if (!std::is_integral<TargetT>::value) {
+			ok(double_eq(num1, num2), "check float number");
+			continue;
+		}
+		if (num1 >= 0) {
+			fail_unless(num2 >= 0);
+			is((uint64_t)num1, (uint64_t)num2, "check int number");
+		} else {
+			fail_unless(num2 < 0);
+			is((int64_t)num1, (int64_t)num2, "check int number");
+		}
+	}
+}
+
+template<typename TargetT, typename ReadF>
+static void
+test_read_num_from_non_numeric_mp(ReadF read_f)
+{
+	const int str_cap = 256;
+	char str[str_cap];
+	char *end = str + str_cap;
+	char *pos = str + snprintf(str, str_cap, "ensure failure of reading ");
+	if (std::is_integral<TargetT>::value) {
+		pos += snprintf(pos, end - pos, "int%zu_t",
+				sizeof(TargetT) * 8);
+	} else if (read_f == (void *)mp_read_double) {
+		pos += snprintf(pos, end - pos, "double");
+	} else if (read_f == (void *)mp_read_double_lossy) {
+		pos += snprintf(pos, end - pos, "double with precision loss");
+	} else {
+		abort();
+	}
+	note("%s", str);
+
+	char bad_types[16][16];
+	int bad_count = 0;
+	mp_encode_array(bad_types[bad_count++], 1);
+	mp_encode_map(bad_types[bad_count++], 1);
+	mp_encode_str0(bad_types[bad_count++], "abc");
+	mp_encode_bool(bad_types[bad_count++], true);
+	mp_encode_ext(bad_types[bad_count++], 1, "abc", 3);
+	mp_encode_bin(bad_types[bad_count++], "abc", 3);
+	mp_encode_nil(bad_types[bad_count++]);
+	for (int i = 0; i < bad_count; ++i) {
+		TargetT val;
+		const char *pos = bad_types[i];
+		char code = *pos;
+		int rc = read_f(&pos, &val);
+		is(rc, -1, "check fail for code 0x%02X", code);
+		is(pos, bad_types[i], "check position for code 0x%02X", code);
+	}
+}
+
+#define test_read_int8(num, success)						\
+	test_read_num<int8_t>(num, mp_read_int8, success)
+#define test_read_int16(num, success)						\
+	test_read_num<int16_t>(num, mp_read_int16, success)
+#define test_read_int32(num, success)						\
+	test_read_num<int32_t>(num, mp_read_int32, success)
+#define test_read_int64(num, success)						\
+	test_read_num<int64_t>(num, mp_read_int64, success)
+#define test_read_double(num, success)						\
+	test_read_num<double>(num, mp_read_double, success)
+#define test_read_double_lossy(num, success)					\
+	test_read_num<double>(num, mp_read_double_lossy, success)
+
+static int
+test_mp_read_typed()
+{
+	plan(716);
+	header();
+
+	test_read_int8(12, true);
+	test_read_int8(127, true);
+	test_read_int8(128, false);
+	test_read_int8(-12, true);
+	test_read_int8(-128, true);
+	test_read_int8(-129, false);
+	test_read_int8(-3e-4f, false);
+	test_read_int8(123.45, false);
+	test_read_num_from_non_numeric_mp<int8_t>(mp_read_int8);
+
+	test_read_int16(123, true);
+	test_read_int16(32767, true);
+	test_read_int16(32768, false);
+	test_read_int16(-123, true);
+	test_read_int16(-32768, true);
+	test_read_int16(-32769, false);
+	test_read_int16(-2e-3f, false);
+	test_read_int16(12.345, false);
+	test_read_num_from_non_numeric_mp<int16_t>(mp_read_int16);
+
+	test_read_int32(123, true);
+	test_read_int32(12345, true);
+	test_read_int32(2147483647, true);
+	test_read_int32(2147483648, false);
+	test_read_int32(-123, true);
+	test_read_int32(-12345, true);
+	test_read_int32(-2147483648, true);
+	test_read_int32(-2147483649LL, false);
+	test_read_int32(-1e2f, false);
+	test_read_int32(1.2345, false);
+	test_read_num_from_non_numeric_mp<int32_t>(mp_read_int32);
+
+	test_read_int64(123, true);
+	test_read_int64(12345, true);
+	test_read_int64(123456789, true);
+	test_read_int64(9223372036854775807ULL, true);
+	test_read_int64(9223372036854775808ULL, false);
+	test_read_int64(-123, true);
+	test_read_int64(-12345, true);
+	test_read_int64(-123456789, true);
+	test_read_int64(-9223372036854775807LL, true);
+	test_read_int64(100.0f, false);
+	test_read_int64(-5.4321, false);
+	test_read_num_from_non_numeric_mp<int64_t>(mp_read_int64);
+
+	test_read_double(123, true);
+	test_read_double(12345, true);
+	test_read_double(123456789, true);
+	test_read_double(1234567890000ULL, true);
+	test_read_double(123456789123456789ULL, false);
+	test_read_double(-123, true);
+	test_read_double(-12345, true);
+	test_read_double(-123456789, true);
+	test_read_double(-1234567890000LL, true);
+	test_read_double(-123456789123456789LL, false);
+	test_read_double(6.565e6f, true);
+	test_read_double(-5.555, true);
+	test_read_num_from_non_numeric_mp<double>(mp_read_double);
+
+	test_read_double_lossy(123, true);
+	test_read_double_lossy(12345, true);
+	test_read_double_lossy(123456789, true);
+	test_read_double_lossy(1234567890000ULL, true);
+	test_read_double_lossy(123456789123456789ULL, true);
+	test_read_double_lossy(-123, true);
+	test_read_double_lossy(-12345, true);
+	test_read_double_lossy(-123456789, true);
+	test_read_double_lossy(-1234567890000LL, true);
+	test_read_double_lossy(-123456789123456789LL, true);
+	test_read_double_lossy(6.565e6f, true);
+	test_read_double_lossy(-5.555, true);
+	test_read_num_from_non_numeric_mp<double>(mp_read_double_lossy);
 
 	footer();
 	return check_plan();
@@ -1335,7 +2064,7 @@ test_numbers()
 static int
 test_overflow()
 {
-	plan(4);
+	plan(5);
 	header();
 
 	const char *chk;
@@ -1344,27 +2073,34 @@ test_overflow()
 	chk = data;
 	d = mp_encode_array(d, 1);
 	d = mp_encode_array(d, UINT32_MAX);
-	is(mp_check(&chk, d), 1, "mp_check array overflow")
+	is(mp_check(&chk, d), 1, "mp_check array overflow");
 
 	d = data;
 	chk = data;
 	d = mp_encode_array(d, 1);
 	d = mp_encode_map(d, UINT32_MAX);
-	is(mp_check(&chk, d), 1, "mp_check map overflow")
+	is(mp_check(&chk, d), 1, "mp_check map overflow");
 
 	d = data;
 	chk = data;
 	d = mp_encode_array(d, 2);
 	d = mp_encode_str(d, "", 0);
 	d = mp_encode_strl(d, UINT32_MAX);
-	is(mp_check(&chk, d), 1, "mp_check str overflow")
+	is(mp_check(&chk, d), 1, "mp_check str overflow");
 
 	d = data;
 	chk = data;
 	d = mp_encode_array(d, 2);
 	d = mp_encode_bin(d, "", 0);
 	d = mp_encode_binl(d, UINT32_MAX);
-	is(mp_check(&chk, d), 1, "mp_check bin overflow")
+	is(mp_check(&chk, d), 1, "mp_check bin overflow");
+
+	d = data;
+	chk = data;
+	d = mp_encode_array(d, 2);
+	d = mp_encode_str0(d, "");
+	d = mp_encode_strl(d, UINT32_MAX);
+	is(mp_check(&chk, d), 1, "mp_check str overflow");
 
 	footer();
 	return check_plan();
@@ -1373,7 +2109,9 @@ test_overflow()
 
 int main()
 {
-	plan(24);
+	plan(28);
+	header();
+
 	test_uints();
 	test_ints();
 	test_bools();
@@ -1388,6 +2126,7 @@ int main()
 	test_exts();
 	test_arrays();
 	test_maps();
+	test_memcpy();
 	test_next_on_arrays();
 	test_next_on_maps();
 	test_compare_uints();
@@ -1396,8 +2135,12 @@ int main()
 	test_mp_print_ext();
 	test_mp_print_ext_tnt();
 	test_mp_check();
-	test_numbers();
+	test_mp_check_exact();
+	test_mp_check_ext_data();
+	test_mp_check_error();
+	test_mp_read_typed();
 	test_overflow();
 
+	footer();
 	return check_plan();
 }
