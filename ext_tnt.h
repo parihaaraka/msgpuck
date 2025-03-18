@@ -1,8 +1,6 @@
 #ifndef EXT_TNT_H_INCLUDED
 #define EXT_TNT_H_INCLUDED
 
-#include <stdlib.h>
-#include <stdint.h>
 #include <stdio.h>
 
 #if defined(__cplusplus)

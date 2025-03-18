@@ -1,4 +1,4 @@
-#include "msgpuck.h"
+#include "mp_extension_types.h"
 
 size_t
 print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
@@ -88,6 +88,66 @@ print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 	return len;
 }
 
+void
+hex_print(char **dst, const char **src, size_t len)
+{
+	const char hex[] = "0123456789abcdef";
+	char *pos = *dst;
+	*dst += len << 1;
+	while (len-- > 0) {
+		*pos++ = hex[(**src>>4) & 0xF];
+		*pos++ = hex[**src & 0xF];
+		++*src;
+	}
+}
+
+size_t
+print_uuid(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
+{
+	if (val_bytes != 16)
+		return -1;
+	size_t res_length = 38;
+	if (buf_size >= res_length)
+	{
+		*(*buf)++ = '"';
+		hex_print(buf, &val, 4);
+		*(*buf)++ = '-';
+		hex_print(buf, &val, 2);
+		*(*buf)++ = '-';
+		hex_print(buf, &val, 2);
+		*(*buf)++ = '-';
+		hex_print(buf, &val, 2);
+		*(*buf)++ = '-';
+		hex_print(buf, &val, 6);
+		*(*buf)++ = '"';
+	}
+	return res_length;
+}
+
+int
+mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth)
+{
+	int8_t type;
+	uint32_t len = mp_decode_extl(data, &type);
+	const char *ext = *data;
+	*data += len;
+	int res_length = 0;
+	switch(type) {
+	case MP_DECIMAL:
+		res_length = print_decimal(&buf, size, ext, len);
+		break;
+	case MP_UUID:
+		res_length = print_uuid(&buf, size, ext, len);
+		break;
+	default:
+		return mp_snprint_ext_default(buf, size, &ext, depth);
+	}
+
+	if (res_length < size && size > 0)
+		*buf = '\0';
+	return res_length;
+}
+
 int
 mp_fprint_ext_tnt(FILE *file, const char **data, int depth)
 {
@@ -96,7 +156,7 @@ mp_fprint_ext_tnt(FILE *file, const char **data, int depth)
 	const char *ext = *data;
 	*data += len;
 	switch(type) {
-	case 1: { /* decimal */
+	case MP_DECIMAL: {
 		char static_buf[128];
 		char *pos = static_buf;
 		size_t res_length = print_decimal(&pos,
@@ -117,26 +177,14 @@ mp_fprint_ext_tnt(FILE *file, const char **data, int depth)
 		}
 		return res_length;
 	}
-		/* TODO uuid and error */
-	}
-	return mp_fprint_ext_default(file, &ext, depth);
-}
-
-int
-mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth)
-{
-	int8_t type;
-	uint32_t len = mp_decode_extl(data, &type);
-	const char *ext = *data;
-	*data += len;
-	switch(type) {
-	case 1: { /* decimal */
-		size_t res_length = print_decimal(&buf, size, ext, len);
-		if (res_length < (size_t)size)
-			*buf = '\0';
+	case MP_UUID: {
+		char buf[39];
+		char *pos = buf;
+		size_t res_length = print_uuid(&pos, sizeof(buf), ext, len);
+		if (res_length > 0 && res_length < sizeof(buf))
+			fprintf(file, "%.*s", (int)res_length, buf);
 		return res_length;
 	}
-		/* TODO uuid and error */
 	}
-	return mp_snprint_ext_default(buf, size, &ext, depth);
+	return mp_fprint_ext_default(file, &ext, depth);
 }

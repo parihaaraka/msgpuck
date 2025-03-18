@@ -1363,8 +1363,8 @@ test_mp_print_ext_tnt(void)
 	mp_snprint_ext = mp_snprint_ext_tnt;
 	mp_fprint_ext = mp_fprint_ext_tnt;
 
-	unsigned char mp_decimals_array[] =
-		"\xdd\x00\x00\x00\x15"       /* array */
+	unsigned char mp_ext_array[] =
+		"\xdd\x00\x00\x00\x16"       /* array */
 		"\xd5\x01\x00\x0c"           /* 0 */
 		"\xd5\x01\xfe\x0c"           /* 0e2 */
 		"\xd5\x01\x00\x1c"           /* 1 */
@@ -1385,23 +1385,26 @@ test_mp_print_ext_tnt(void)
 		"\xc7\x03\x01\x03\x01\x2c"   /* 12e-3 */
 		"\xc7\x03\x01\xff\x01\x2c"   /* 12e1 */
 		"\xc7\x03\x01\xfe\x01\x2c"   /* 12e2 */
-		"\xc7\x03\x01\xfd\x01\x2c";  /* 12e3 */
+		"\xc7\x03\x01\xfd\x01\x2c"   /* 12e3 */
+		/* uuid f6423bdf-b49e-4913-b361-0740c9702e4b */
+		"\xd8\x02\xf6\x42\x3b\xdf\xb4\x9e\x49\x13\xb3\x61\x07\x40\xc9\x70\x2e\x4b";
 
 	const char expected[] =
 		"[0, 0, 1, -1, -12.34, -123.45, -1.0000, 1, 0.1, 0.01, "
-			"0.000000000000000000000000000000000010, 10, 100, "
-			"10000000000000000000000000000000000000, 12, 1.2, "
-			"0.12, 0.012, 120, 1200, 12000]";
+		"0.000000000000000000000000000000000010, 10, 100, "
+		"10000000000000000000000000000000000000, 12, 1.2, "
+		"0.12, 0.012, 120, 1200, 12000, "
+		"\"f6423bdf-b49e-4913-b361-0740c9702e4b\"]";
 
 	char result[256];
-	int fsize = mp_snprint(result, sizeof(result), (const char*)mp_decimals_array);
+	int fsize = mp_snprint(result, sizeof(result), (const char*)mp_ext_array);
 	ok(fsize == sizeof(expected) - 1, "mp_snprint return value");
 	ok(strcmp(result, expected) == 0, "mp_snprint result");
 
 	FILE *tmpf = tmpfile();
 	if (tmpf == NULL)
 		abort();
-	fsize = mp_fprint(tmpf, (const char*)mp_decimals_array);
+	fsize = mp_fprint(tmpf, (const char*)mp_ext_array);
 	is(fsize, sizeof(expected) - 1, "mp_fprint size match");
 	rewind(tmpf);
 	fsize = (int)fread(result, 1, sizeof(result), tmpf);
