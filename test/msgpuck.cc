@@ -1364,7 +1364,7 @@ test_mp_print_ext_tnt(void)
 	mp_fprint_ext = mp_fprint_ext_tnt;
 
 	unsigned char mp_ext_array[] =
-		"\xdd\x00\x00\x00\x16"       /* array */
+		"\xdd\x00\x00\x00\x17"       /* array */
 		"\xd5\x01\x00\x0c"           /* 0 */
 		"\xd5\x01\xfe\x0c"           /* 0e2 */
 		"\xd5\x01\x00\x1c"           /* 1 */
@@ -1387,16 +1387,29 @@ test_mp_print_ext_tnt(void)
 		"\xc7\x03\x01\xfe\x01\x2c"   /* 12e2 */
 		"\xc7\x03\x01\xfd\x01\x2c"   /* 12e3 */
 		/* uuid f6423bdf-b49e-4913-b361-0740c9702e4b */
-		"\xd8\x02\xf6\x42\x3b\xdf\xb4\x9e\x49\x13\xb3\x61\x07\x40\xc9\x70\x2e\x4b";
+		"\xd8\x02\xf6\x42\x3b\xdf\xb4\x9e\x49\x13\xb3\x61\x07\x40\xc9\x70\x2e\x4b"
+		/* error */
+		"\xc7\x5a\x03"
+								   "\x81\x00\x91\x87\x00\xab\x43\x6c\x69\x65\x6e"
+								   "\x74\x45\x72\x72\x6f\x72\x02\xcd\x04\xd7\x01"
+								   "\xba\x2f\x6f\x70\x74\x2f\x74\x61\x72\x61\x6e"
+								   "\x74\x6f\x6f\x6c\x2f\x61\x70\x69\x2f\x65\x78"
+								   "\x74\x2e\x6c\x75\x61\x03\xb2\x6f\x72\x64\x65"
+								   "\x72\x20\x69\x73\x20\x6e\x6f\x74\x20\x66\x6f"
+								   "\x75\x6e\x64\x04\x00\x05\xcd\x4e\x21\x06\x81"
+								   "\xa4\x6e\x61\x6d\x65\xa7\x55\x4e\x4b\x4e\x4f"
+								   "\x57\x4e";
 
 	const char expected[] =
 		"[0, 0, 1, -1, -12.34, -123.45, -1.0000, 1, 0.1, 0.01, "
 		"0.000000000000000000000000000000000010, 10, 100, "
 		"10000000000000000000000000000000000000, 12, 1.2, "
 		"0.12, 0.012, 120, 1200, 12000, "
-		"\"f6423bdf-b49e-4913-b361-0740c9702e4b\"]";
+		"\"f6423bdf-b49e-4913-b361-0740c9702e4b\", "
+		"{\"stack\": [{\"type\": \"ClientError\", \"line\": 1239, \"file\": \"/opt/tarantool/api/ext.lua\", \"message\": \"order is not found\", \"code\": 20001, \"fields\": {\"name\": \"UNKNOWN\"}}]}"
+		"]";
 
-	char result[256];
+	char result[1024];
 	int fsize = mp_snprint(result, sizeof(result), (const char*)mp_ext_array);
 	ok(fsize == sizeof(expected) - 1, "mp_snprint return value");
 	ok(strcmp(result, expected) == 0, "mp_snprint result");
@@ -1407,6 +1420,13 @@ test_mp_print_ext_tnt(void)
 	fsize = mp_fprint(tmpf, (const char*)mp_ext_array);
 	is(fsize, sizeof(expected) - 1, "mp_fprint size match");
 	rewind(tmpf);
+	/*fsize = 0;
+	for (;;) {
+		int len = fread(result + fsize, 1, sizeof(result) - fsize, tmpf);
+		if (!len)
+			break;
+		fsize += len;
+	}*/
 	fsize = (int)fread(result, 1, sizeof(result), tmpf);
 	is(fsize, sizeof(expected) - 1, "mp_fprint written correct number of bytes");
 	result[fsize] = 0;

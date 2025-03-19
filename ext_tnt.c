@@ -1,6 +1,6 @@
 #include "mp_extension_types.h"
 
-size_t
+int
 print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 {
 	int64_t scale = 0;
@@ -12,12 +12,12 @@ print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 		scale = mp_decode_int(&val);
 
 	if (scale_head == val || !val_bytes)
-		return 0;         /* "undefined" (is ext mp type 1 misused?) */
+		return -1;         /* "undefined" (is ext mp type 1 misused?) */
 
 	val_bytes -= val - scale_head;
 
 	char *pos = *buf;
-	size_t output_length = 0;
+	int output_length = 0;
 	uint8_t sign_nibble = (uint8_t)(val[val_bytes - 1]) & 0xF;
 	if (sign_nibble == 0xB || sign_nibble == 0xD) {
 		++output_length;
@@ -41,7 +41,7 @@ print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 		output_length += nibbles_left + (size_t)(-scale);
 	}
 
-	if (output_length > buf_size)
+	if ((size_t)output_length > buf_size)
 		return output_length;
 
 	char *first_dec_digit = pos;
@@ -82,7 +82,7 @@ print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 		pos = first_dec_digit + 1;
 	}
 
-	size_t len = (size_t)(pos - *buf);
+	int len = (pos - *buf);
 	assert(len == output_length);
 	*buf = pos;
 	return len;
@@ -101,14 +101,13 @@ hex_print(char **dst, const char **src, size_t len)
 	}
 }
 
-size_t
+int
 print_uuid(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 {
 	if (val_bytes != 16)
 		return -1;
-	size_t res_length = 38;
-	if (buf_size >= res_length)
-	{
+	int res_length = 38;
+	if (buf_size >= (size_t)res_length)	{
 		*(*buf)++ = '"';
 		hex_print(buf, &val, 4);
 		*(*buf)++ = '-';
@@ -122,6 +121,101 @@ print_uuid(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 		*(*buf)++ = '"';
 	}
 	return res_length;
+}
+
+int
+print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
+{
+	(void)val_bytes;
+	int total_length = 0;
+
+#define PRINT(FN, ...) \
+	{ \
+		int res = FN(*buf, buf_size, __VA_ARGS__); \
+		if (mp_unlikely(res < 0)) \
+		return res; \
+		if ((size_t)res < buf_size) {*buf += res; buf_size -= res;} \
+		else {*buf = NULL; buf_size = 0;} \
+		total_length += res; \
+	}
+
+#define PRINT_HEX() \
+	{ \
+		const char *start = val; \
+		mp_next(&val); \
+		int src_len = val - start; \
+		int dst_len = src_len << 1; \
+		if (*buf && buf_size > (size_t)dst_len) { \
+			hex_print(buf, &start, src_len); \
+			buf_size -= dst_len; \
+		} else { \
+			*buf = NULL; \
+			buf_size = 0; \
+		} \
+		total_length += dst_len; \
+	}
+
+	PRINT(snprintf, "{")
+	uint32_t ext_payload_count = mp_decode_map(&val);
+	for (uint32_t map0item = 0; map0item < ext_payload_count; ++map0item) {
+		if (map0item)
+			PRINT(snprintf, ", ")
+		uint64_t key = mp_decode_uint(&val);
+		if (key == 0) { // MP_ERROR_STACK
+			PRINT(snprintf, "\"stack\": [")
+			uint32_t stack_count = mp_decode_array(&val);
+			for (uint32_t array1item = 0; array1item < stack_count; ++array1item) {
+				PRINT(snprintf, (array1item > 0 ? ", {" : "{"))
+				uint32_t error_fields_count = mp_decode_map(&val);
+				for (uint32_t map1item = 0; map1item < error_fields_count; ++map1item) {
+					if (map1item)
+						PRINT(snprintf, ", ")
+					uint64_t key = mp_decode_uint(&val);
+					switch(key) {
+					case 0: PRINT(snprintf, "\"type\": "); PRINT(mp_snprint, val); mp_next(&val); break;
+					case 1: PRINT(snprintf, "\"file\": "); PRINT(mp_snprint, val); mp_next(&val); break;
+					case 2: PRINT(snprintf, "\"line\": "); PRINT(mp_snprint, val); mp_next(&val); break;
+					case 3: PRINT(snprintf, "\"message\": "); PRINT(mp_snprint, val); mp_next(&val); break;
+					case 4: {
+						uint64_t errno = mp_decode_uint(&val);
+						if (errno)
+							PRINT(snprintf, "\"errno\": %ld", errno)
+						else if (map1item) {
+							if (*buf) {*buf -= 2; buf_size -= 2;}
+							total_length -= 2;
+						}
+						break;
+					}
+					case 5: {
+						uint64_t code = mp_decode_uint(&val);
+						if (code)
+							PRINT(snprintf, "\"code\": %ld", code)
+						else if (map1item) {
+							if (*buf) {*buf -= 2; buf_size -= 2;}
+							total_length -= 2;
+						}
+						break;
+					}
+					case 6:
+						PRINT(snprintf, "\"fields\": "); PRINT(mp_snprint, val); mp_next(&val); break;
+					default: // print unknown keys in hex
+						PRINT(snprintf, "\"%lu\": \"", key)
+						PRINT_HEX()
+						PRINT(snprintf, "\"")
+					}
+				}
+				PRINT(snprintf, "}")
+			}
+			PRINT(snprintf, "]")
+		} else { // print unknown keys in hex
+			PRINT(snprintf, "\"%lu\": \"", key)
+			PRINT_HEX()
+			PRINT(snprintf, "\"")
+		}
+	}
+	PRINT(snprintf, "}")
+
+	return total_length;
 }
 
 int
@@ -139,11 +233,14 @@ mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth)
 	case MP_UUID:
 		res_length = print_uuid(&buf, size, ext, len);
 		break;
+	case MP_ERROR:
+		res_length = print_error_stack(&buf, size, ext, len);
+		break;
 	default:
 		return mp_snprint_ext_default(buf, size, &ext, depth);
 	}
 
-	if (res_length < size && size > 0)
+	if (buf && res_length < size && size > 0)
 		*buf = '\0';
 	return res_length;
 }
@@ -152,39 +249,52 @@ int
 mp_fprint_ext_tnt(FILE *file, const char **data, int depth)
 {
 	int8_t type;
+	int res_length = 0;
 	uint32_t len = mp_decode_extl(data, &type);
 	const char *ext = *data;
 	*data += len;
+	int (*buf_printer)(char **, size_t, const char *, uint32_t);
+	size_t first_try_buf_size = 0;
 	switch(type) {
-	case MP_DECIMAL: {
-		char static_buf[128];
-		char *pos = static_buf;
-		size_t res_length = print_decimal(&pos,
-										  sizeof(static_buf),
-										  ext,
-										  len);
-		if (res_length >= sizeof(static_buf)) {
-			char *dynamic_buf = malloc(res_length);
-			char *pos = dynamic_buf;
-			print_decimal(&pos,
-						  res_length,
-						  ext,
-						  len);
-			fprintf(file, "%.*s", (int)res_length, dynamic_buf);
-			free(dynamic_buf);
-		} else {
-			fprintf(file, "%.*s", (int)res_length, static_buf);
-		}
-		return res_length;
-	}
+	case MP_DECIMAL:
+		buf_printer = print_decimal;
+		first_try_buf_size = 128;
+		break;
 	case MP_UUID: {
-		char buf[39];
-		char *pos = buf;
-		size_t res_length = print_uuid(&pos, sizeof(buf), ext, len);
-		if (res_length > 0 && res_length < sizeof(buf))
-			fprintf(file, "%.*s", (int)res_length, buf);
+		buf_printer = print_uuid;
+		first_try_buf_size = 64; // 39 required
+		break;
+	}
+	case MP_ERROR: {
+		buf_printer = print_error_stack;
+		first_try_buf_size = 1024;
+		break;
+	}
+	default:
+		return mp_fprint_ext_default(file, &ext, depth);
+	}
+
+	char *static_buf = alloca(first_try_buf_size);
+	char *pos = static_buf;
+	res_length = buf_printer(&pos,
+							 first_try_buf_size,
+							 ext,
+							 len);
+	if (res_length <= 0)
 		return res_length;
+
+	if ((size_t)res_length > first_try_buf_size) {
+		char *dynamic_buf = malloc(res_length + 1);
+		pos = dynamic_buf;
+		buf_printer(&pos,
+					res_length + 1,
+					ext,
+					len);
+		fprintf(file, "%.*s", res_length, dynamic_buf);
+		free(dynamic_buf);
+	} else {
+		fprintf(file, "%.*s", res_length, static_buf);
 	}
-	}
-	return mp_fprint_ext_default(file, &ext, depth);
+
+	return res_length;
 }
