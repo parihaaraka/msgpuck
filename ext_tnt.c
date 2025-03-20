@@ -1,15 +1,6 @@
 #include "msgpuck.h"
-
-enum mp_extension_type {
-	MP_UNKNOWN_EXTENSION = 0,
-	MP_DECIMAL = 1,
-	MP_UUID = 2,
-	MP_ERROR = 3,
-	MP_DATETIME = 4,
-	MP_COMPRESSION = 5,
-	MP_INTERVAL = 6,
-	mp_extension_type_MAX,
-};
+#include <alloca.h>
+#include "ext_tnt.h"
 
 int
 print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
@@ -276,26 +267,6 @@ print_interval(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 {
 	(void)val_bytes;
 
-	// https://github.com/tarantool/c-dt/blob/cec6acebb54d9e73ea0b99c63898732abd7683a6/dt_arithmetic.h
-	typedef enum {
-		DT_EXCESS, // tnt excess
-		DT_LIMIT,  // tnt none
-		DT_SNAP    // tnt last
-	} dt_adjust_t;
-
-	enum interval_fields {
-		FIELD_YEAR = 0,
-		FIELD_MONTH,
-		FIELD_WEEK,
-		FIELD_DAY,
-		FIELD_HOUR,
-		FIELD_MINUTE,
-		FIELD_SECOND,
-		FIELD_NANOSECOND,
-		FIELD_ADJUST,
-	};
-
-	// https://github.com/tarantool/tarantool/blob/master/src/lib/core/datetime.h
 	int64_t parts[] = {0, 0, 0, 0, 0, 0, 0, 0};
 	dt_adjust_t adjust = DT_LIMIT; // tnt default
 
