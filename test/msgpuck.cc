@@ -1364,7 +1364,7 @@ test_mp_print_ext_tnt(void)
 	mp_fprint_ext = mp_fprint_ext_tnt;
 
 	unsigned char mp_ext_array[] =
-		"\xdd\x00\x00\x00\x17"       /* array */
+		"\xdd\x00\x00\x00\x1c"       /* array */
 		"\xd5\x01\x00\x0c"           /* 0 */
 		"\xd5\x01\xfe\x0c"           /* 0e2 */
 		"\xd5\x01\x00\x1c"           /* 1 */
@@ -1398,7 +1398,16 @@ test_mp_print_ext_tnt(void)
 								   "\x72\x20\x69\x73\x20\x6e\x6f\x74\x20\x66\x6f"
 								   "\x75\x6e\x64\x04\x00\x05\xcd\x4e\x21\x06\x81"
 								   "\xa4\x6e\x61\x6d\x65\xa7\x55\x4e\x4b\x4e\x4f"
-								   "\x57\x4e";
+								   "\x57\x4e"
+		/* datetime 2021-08-20T18:25:20.123456789+0300 */
+		"\xd8\x04\x60\xc9\x1f\x61\x00\x00\x00\x00\x15\xcd\x5b\x07\xb4\x00\x00\x00"
+		/* datetime 2021-02-28T00:00:00Z */
+		"\xd7\x04\x00\xdd\x3a\x60\x00\x00\x00\x00"
+		/* interval +1 years, 200 months, -77 days */
+		"\xc7\x0b\x06\x04\x00\x01\x01\xcc\xc8\x03\xd0\xb3\x08\x01"
+		"\xc7\x0b\x06\x04\x00\x01\x01\xcc\xc8\x03\xd0\xb3\x08\x02"
+		/* +1 weeks, -1 days */
+		"\xc7\x07\x06\x03\x02\x01\x03\xff\x08\x01";
 
 	const char expected[] =
 		"[0, 0, 1, -1, -12.34, -123.45, -1.0000, 1, 0.1, 0.01, "
@@ -1406,10 +1415,15 @@ test_mp_print_ext_tnt(void)
 		"10000000000000000000000000000000000000, 12, 1.2, "
 		"0.12, 0.012, 120, 1200, 12000, "
 		"\"f6423bdf-b49e-4913-b361-0740c9702e4b\", "
-		"{\"stack\": [{\"type\": \"ClientError\", \"line\": 1239, \"file\": \"/opt/tarantool/api/ext.lua\", \"message\": \"order is not found\", \"code\": 20001, \"fields\": {\"name\": \"UNKNOWN\"}}]}"
+		"{\"stack\": [{\"type\": \"ClientError\", \"line\": 1239, \"file\": \"/opt/tarantool/api/ext.lua\", \"message\": \"order is not found\", \"code\": 20001, \"fields\": {\"name\": \"UNKNOWN\"}}]}, "
+		"1629473120.123456789, "
+		"1614470400, "
+		"{\"year\": 1, \"month\": 200, \"day\": -77}, "
+		"{\"year\": 1, \"month\": 200, \"day\": -77, \"adjust\": \"last\"}, "
+		"{\"week\": 1, \"day\": -1}"
 		"]";
 
-	char result[1024];
+	char result[2048];
 	int fsize = mp_snprint(result, sizeof(result), (const char*)mp_ext_array);
 	ok(fsize == sizeof(expected) - 1, "mp_snprint return value");
 	ok(strcmp(result, expected) == 0, "mp_snprint result");

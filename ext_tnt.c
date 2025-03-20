@@ -1,4 +1,15 @@
-#include "mp_extension_types.h"
+#include "msgpuck.h"
+
+enum mp_extension_type {
+	MP_UNKNOWN_EXTENSION = 0,
+	MP_DECIMAL = 1,
+	MP_UUID = 2,
+	MP_ERROR = 3,
+	MP_DATETIME = 4,
+	MP_COMPRESSION = 5,
+	MP_INTERVAL = 6,
+	mp_extension_type_MAX,
+};
 
 int
 print_decimal(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
@@ -123,21 +134,21 @@ print_uuid(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 	return res_length;
 }
 
+#define PRINT(FN, ...) \
+{ \
+	int res = FN(*buf, buf_size, __VA_ARGS__); \
+	if (mp_unlikely(res < 0)) \
+	return res; \
+	if ((size_t)res < buf_size) {*buf += res; buf_size -= res;} \
+	else {*buf = NULL; buf_size = 0;} \
+	total_length += res; \
+}
+
 int
 print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
 {
 	(void)val_bytes;
 	int total_length = 0;
-
-#define PRINT(FN, ...) \
-	{ \
-		int res = FN(*buf, buf_size, __VA_ARGS__); \
-		if (mp_unlikely(res < 0)) \
-		return res; \
-		if ((size_t)res < buf_size) {*buf += res; buf_size -= res;} \
-		else {*buf = NULL; buf_size = 0;} \
-		total_length += res; \
-	}
 
 #define PRINT_HEX() \
 	{ \
@@ -167,8 +178,9 @@ print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_byt
 			for (uint32_t array1item = 0; array1item < stack_count; ++array1item) {
 				PRINT(snprintf, (array1item > 0 ? ", {" : "{"))
 				uint32_t error_fields_count = mp_decode_map(&val);
-				for (uint32_t map1item = 0; map1item < error_fields_count; ++map1item) {
-					if (map1item)
+				int prev_length = total_length;
+				while (error_fields_count-- > 0) {
+					if (total_length > prev_length)
 						PRINT(snprintf, ", ")
 					uint64_t key = mp_decode_uint(&val);
 					switch(key) {
@@ -180,7 +192,7 @@ print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_byt
 						uint64_t errno = mp_decode_uint(&val);
 						if (errno)
 							PRINT(snprintf, "\"errno\": %ld", errno)
-						else if (map1item) {
+						else if (total_length > prev_length) {
 							if (*buf) {*buf -= 2; buf_size -= 2;}
 							total_length -= 2;
 						}
@@ -190,7 +202,7 @@ print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_byt
 						uint64_t code = mp_decode_uint(&val);
 						if (code)
 							PRINT(snprintf, "\"code\": %ld", code)
-						else if (map1item) {
+						else if (total_length > prev_length) {
 							if (*buf) {*buf -= 2; buf_size -= 2;}
 							total_length -= 2;
 						}
@@ -218,6 +230,114 @@ print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_byt
 	return total_length;
 }
 
+#define PRINT_UNIX_TIME(epoch, nsec) \
+{ \
+	PRINT(snprintf, "%ld", epoch); \
+	if (nsec != 0) { \
+		if (nsec % 1000000 == 0) { \
+			PRINT(snprintf, ".%03d", nsec / 1000000); \
+		} else if (nsec % 1000 == 0) { \
+			PRINT(snprintf, ".%06d", nsec / 1000); \
+		} else { \
+			PRINT(snprintf, ".%09d", nsec); \
+		} \
+	} \
+}
+
+int
+print_datetime(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
+{
+	// print the datetime as unix time (fp value)
+
+	struct tmp {
+		int32_t nsec;
+		int16_t tzoffset;
+		int16_t tzindex;
+	} tail = {0, 0, 0};
+
+	if (val_bytes != sizeof(int64_t) && val_bytes != sizeof(int64_t) + sizeof(tail))
+		return -1;
+
+	int total_length = 0;
+	int64_t epoch;
+	memcpy(&epoch, val, sizeof(epoch));
+	val += sizeof(epoch);
+
+	if (val_bytes != sizeof(int64_t))
+		memcpy(&tail, val, sizeof(tail));
+
+	PRINT_UNIX_TIME(epoch, tail.nsec);
+
+	return total_length;
+}
+
+int
+print_interval(char **buf, size_t buf_size, const char *val, uint32_t val_bytes)
+{
+	(void)val_bytes;
+
+	// https://github.com/tarantool/c-dt/blob/cec6acebb54d9e73ea0b99c63898732abd7683a6/dt_arithmetic.h
+	typedef enum {
+		DT_EXCESS, // tnt excess
+		DT_LIMIT,  // tnt none
+		DT_SNAP    // tnt last
+	} dt_adjust_t;
+
+	enum interval_fields {
+		FIELD_YEAR = 0,
+		FIELD_MONTH,
+		FIELD_WEEK,
+		FIELD_DAY,
+		FIELD_HOUR,
+		FIELD_MINUTE,
+		FIELD_SECOND,
+		FIELD_NANOSECOND,
+		FIELD_ADJUST,
+	};
+
+	// https://github.com/tarantool/tarantool/blob/master/src/lib/core/datetime.h
+	int64_t parts[] = {0, 0, 0, 0, 0, 0, 0, 0};
+	dt_adjust_t adjust = DT_LIMIT; // tnt default
+
+	int total_length = 0;
+	uint8_t ext_payload_count = mp_load_u8(&val);
+	while (ext_payload_count-- > 0) {
+		uint64_t key = mp_decode_uint(&val);
+		int64_t value;
+		enum mp_type type = mp_typeof(*val);
+		if ((type != MP_UINT && type != MP_INT) || mp_read_int64(&val, &value) != 0)
+			return -1;
+		if (key < FIELD_ADJUST)
+			parts[key] = value;
+		else if (key == FIELD_ADJUST) {
+			if (value > (int64_t)DT_SNAP || value < 0)
+				return -1;
+			adjust = (dt_adjust_t)value;
+		}
+	}
+
+	/*if (parts[0] == 0 && parts[1] == 0) {
+		// compose unix time (difference in seconds)
+		int64_t epoch = parts[2] * 7 * 24 * 3600 + parts[3] * 24 * 3600 + parts[4] * 3600 + parts[5] * 60 + parts[6];
+		PRINT_UNIX_TIME(epoch, (int32_t)parts[7]);
+	} else*/ {
+		// compose a map
+		char *labels[] = {"year", "month", "week", "day", "hour", "min", "sec", "nsec"};
+		PRINT(snprintf, "{")
+		for (size_t i = 0; i < FIELD_ADJUST; ++i) {
+			if (parts[i])
+				PRINT(snprintf, "%s\"%s\": %ld", (total_length > 1 ? ", " : ""), labels[i], parts[i])
+		}
+		if (adjust != DT_LIMIT && total_length > 1) {
+			char *adjust_labels[] = {"excess", "none", "last"};
+			PRINT(snprintf, ", \"adjust\": \"%s\"", adjust_labels[adjust])
+		}
+		PRINT(snprintf, "}")
+	}
+
+	return total_length;
+}
+
 int
 mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth)
 {
@@ -235,6 +355,12 @@ mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth)
 		break;
 	case MP_ERROR:
 		res_length = print_error_stack(&buf, size, ext, len);
+		break;
+	case MP_DATETIME:
+		res_length = print_datetime(&buf, size, ext, len);
+		break;
+	case MP_INTERVAL:
+		res_length = print_interval(&buf, size, ext, len);
 		break;
 	default:
 		return mp_snprint_ext_default(buf, size, &ext, depth);
@@ -260,16 +386,22 @@ mp_fprint_ext_tnt(FILE *file, const char **data, int depth)
 		buf_printer = print_decimal;
 		first_try_buf_size = 128;
 		break;
-	case MP_UUID: {
+	case MP_UUID:
 		buf_printer = print_uuid;
 		first_try_buf_size = 64; // 39 required
 		break;
-	}
-	case MP_ERROR: {
+	case MP_ERROR:
 		buf_printer = print_error_stack;
 		first_try_buf_size = 1024;
 		break;
-	}
+	case MP_DATETIME:
+		buf_printer = print_datetime;
+		first_try_buf_size = 32;
+		break;
+	case MP_INTERVAL:
+		buf_printer = print_interval;
+		first_try_buf_size = 128;
+		break;
 	default:
 		return mp_fprint_ext_default(file, &ext, depth);
 	}
