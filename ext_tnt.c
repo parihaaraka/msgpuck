@@ -184,7 +184,10 @@ print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_byt
 						if (errno)
 							PRINT(snprintf, "\"errno\": %ld", errno)
 						else if (total_length > prev_length) {
-							if (*buf) {*buf -= 2; buf_size -= 2;}
+							if (*buf) {
+								*buf -= 2;
+								buf_size += 2;
+							}
 							total_length -= 2;
 						}
 						break;
@@ -194,7 +197,10 @@ print_error_stack(char **buf, size_t buf_size, const char *val, uint32_t val_byt
 						if (code)
 							PRINT(snprintf, "\"code\": %ld", code)
 						else if (total_length > prev_length) {
-							if (*buf) {*buf -= 2; buf_size -= 2;}
+							if (*buf) {
+								*buf -= 2;
+								buf_size += 2;
+							}
 							total_length -= 2;
 						}
 						break;
