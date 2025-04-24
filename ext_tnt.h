@@ -2,6 +2,7 @@
 #define EXT_TNT_H_INCLUDED
 
 #include <stdio.h>
+#include <stdint.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -38,10 +39,15 @@ typedef enum {
     FIELD_ADJUST,
 } interval_fields;
 
+typedef enum {
+    QUOTE_DECIMAL = 1,
+    UNQUOTE_UUID = 2,
+} print_ext_flags;
+
 int
-mp_fprint_ext_tnt(FILE *file, const char **data, int depth);
+mp_fprint_ext_tnt(FILE *file, const char **data, int depth, uint32_t flags);
 int
-mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth);
+mp_snprint_ext_tnt(char *buf, int size, const char **data, int depth, uint32_t flags);
 /**
  * @brief Encodes len bytes from src into dst.
  * @param dst Output buffer. Make sure it has len*2 bytes available.

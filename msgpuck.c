@@ -34,9 +34,10 @@
 #include "msgpuck.h"
 
 int
-mp_fprint_ext_default(FILE *file, const char **data, int depth)
+mp_fprint_ext_default(FILE *file, const char **data, int depth, uint32_t flags)
 {
 	(void) depth;
+	(void) flags;
 	int8_t type;
 	uint32_t len;
 	mp_decode_ext(data, &type, &len);
@@ -45,9 +46,10 @@ mp_fprint_ext_default(FILE *file, const char **data, int depth)
 }
 
 int
-mp_snprint_ext_default(char *buf, int size, const char **data, int depth)
+mp_snprint_ext_default(char *buf, int size, const char **data, int depth, uint32_t flags)
 {
 	(void) depth;
+	(void) flags;
 	int8_t type;
 	uint32_t len;
 	mp_decode_ext(data, &type, &len);
@@ -370,7 +372,7 @@ mp_format(char *data, size_t data_size, const char *format, ...)
 }
 
 int
-mp_fprint_recursion(FILE *file, const char **data, int depth)
+mp_fprint_recursion(FILE *file, const char **data, int depth, uint32_t flags)
 {
 	int total_bytes = 0;
 #define HANDLE(FUN, ...) do {							\
@@ -379,9 +381,9 @@ mp_fprint_recursion(FILE *file, const char **data, int depth)
 		return -1;							\
 	total_bytes += bytes;							\
 } while (0)
-#define PRINT_EXT(...) HANDLE(mp_fprint_ext, __VA_ARGS__, depth)
+#define PRINT_EXT(...) HANDLE(mp_fprint_ext, __VA_ARGS__, depth, flags)
 #define PRINT(...) HANDLE(fprintf, __VA_ARGS__)
-#define SELF(...) HANDLE(mp_fprint_recursion, __VA_ARGS__, depth)
+#define SELF(...) HANDLE(mp_fprint_recursion, __VA_ARGS__, depth, flags)
 MP_PRINT(SELF, PRINT)
 #undef HANDLE
 #undef SELF
@@ -391,16 +393,16 @@ MP_PRINT(SELF, PRINT)
 }
 
 int
-mp_fprint(FILE *file, const char *data)
+mp_fprint(FILE *file, const char *data, uint32_t flags)
 {
 	if (!file)
 		file = stdout;
-	int res = mp_fprint_recursion(file, &data, MP_PRINT_MAX_DEPTH);
+	int res = mp_fprint_recursion(file, &data, MP_PRINT_MAX_DEPTH, flags);
 	return res;
 }
 
 int
-mp_snprint_recursion(char *buf, int size, const char **data, int depth)
+mp_snprint_recursion(char *buf, int size, const char **data, int depth, uint32_t flags)
 {
 	int total_bytes = 0;
 #define HANDLE(FUN, ...) do {							\
@@ -417,9 +419,9 @@ mp_snprint_recursion(char *buf, int size, const char **data, int depth)
 		size = 0;							\
 	}									\
 } while (0)
-#define PRINT_EXT(...) HANDLE(mp_snprint_ext, __VA_ARGS__, depth)
+#define PRINT_EXT(...) HANDLE(mp_snprint_ext, __VA_ARGS__, depth, flags)
 #define PRINT(...) HANDLE(snprintf, __VA_ARGS__)
-#define SELF(...) HANDLE(mp_snprint_recursion, __VA_ARGS__, depth)
+#define SELF(...) HANDLE(mp_snprint_recursion, __VA_ARGS__, depth, flags)
 MP_PRINT(SELF, PRINT)
 #undef HANDLE
 #undef SELF
@@ -430,7 +432,7 @@ MP_PRINT(SELF, PRINT)
 #undef MP_PRINT
 
 int
-mp_snprint(char *buf, int size, const char *data)
+mp_snprint(char *buf, int size, const char *data, uint32_t flags)
 {
-	return mp_snprint_recursion(buf, size, &data, MP_PRINT_MAX_DEPTH);
+	return mp_snprint_recursion(buf, size, &data, MP_PRINT_MAX_DEPTH, flags);
 }

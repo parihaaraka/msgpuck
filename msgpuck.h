@@ -1236,7 +1236,7 @@ mp_vformat(char *data, size_t data_size, const char *format, va_list args);
  * \sa fprintf()
  */
 int
-mp_fprint(FILE *file, const char *data);
+mp_fprint(FILE *file, const char *data, uint32_t flags);
 
 /**
  * \brief Print MsgPack data to \a file using JSON-like format.
@@ -1245,9 +1245,9 @@ mp_fprint(FILE *file, const char *data);
  * MsgPack serialization recursion.
  */
 int
-mp_fprint_recursion(FILE *file, const char **data, int depth);
+mp_fprint_recursion(FILE *file, const char **data, int depth, uint32_t flags);
 
-typedef int (*mp_fprint_ext_f)(FILE *file, const char **data, int depth);
+typedef int (*mp_fprint_ext_f)(FILE *file, const char **data, int depth, uint32_t flags);
 
 /**
  * \brief Function called when need to serialize MP_EXT into a
@@ -1264,7 +1264,7 @@ extern mp_fprint_ext_f mp_fprint_ext;
  * \sa mp_fprint().
  */
 int
-mp_fprint_ext_default(FILE *file, const char **data, int depth);
+mp_fprint_ext_default(FILE *file, const char **data, int depth, uint32_t flags);
 
 /**
  * \brief format MsgPack data to \a buf using JSON-like format.
@@ -1283,7 +1283,7 @@ mp_fprint_ext_default(FILE *file, const char **data, int depth);
  * \sa snprintf()
  */
 int
-mp_snprint(char *buf, int size, const char *data);
+mp_snprint(char *buf, int size, const char *data, uint32_t flags);
 
 /**
  * \brief Format MsgPack data to \a buf using JSON-like format.
@@ -1292,10 +1292,10 @@ mp_snprint(char *buf, int size, const char *data);
  * MsgPack serialization recursion.
  */
 int
-mp_snprint_recursion(char *buf, int size, const char **data, int depth);
+mp_snprint_recursion(char *buf, int size, const char **data, int depth, uint32_t flags);
 
 typedef int (*mp_snprint_ext_f)(char *buf, int size, const char **data,
-				int depth);
+				int depth, uint32_t flags);
 
 /**
  * \brief Function called when need to serialize MP_EXT into a
@@ -1312,7 +1312,7 @@ extern mp_snprint_ext_f mp_snprint_ext;
  * \sa mp_snprint().
  */
 int
-mp_snprint_ext_default(char *buf, int size, const char **data, int depth);
+mp_snprint_ext_default(char *buf, int size, const char **data, int depth, uint32_t flags);
 
 typedef int (*mp_check_ext_data_f)(int8_t type, const char *data, uint32_t len);
 

@@ -1205,30 +1205,30 @@ test_mp_print()
 
 	char result[256];
 
-	int fsize = mp_snprint(result, sizeof(result), msgpack);
+	int fsize = mp_snprint(result, sizeof(result), msgpack, 0);
 	ok(fsize == esize, "mp_snprint return value");
 	ok(strcmp(result, expected) == 0, "mp_snprint result");
 
-	fsize = mp_snprint(NULL, 0, msgpack);
+	fsize = mp_snprint(NULL, 0, msgpack, 0);
 	ok(fsize == esize, "mp_snprint limit = 0");
 
-	fsize = mp_snprint(result, 1, msgpack);
+	fsize = mp_snprint(result, 1, msgpack, 0);
 	ok(fsize == esize && result[0] == '\0', "mp_snprint limit = 1");
 
-	fsize = mp_snprint(result, 2, msgpack);
+	fsize = mp_snprint(result, 2, msgpack, 0);
 	ok(fsize == esize && result[1] == '\0', "mp_snprint limit = 2");
 
-	fsize = mp_snprint(result, esize, msgpack);
+	fsize = mp_snprint(result, esize, msgpack, 0);
 	ok(fsize == esize && result[esize - 1] == '\0',
 	   "mp_snprint limit = expected");
 
-	fsize = mp_snprint(result, esize + 1, msgpack);
+	fsize = mp_snprint(result, esize + 1, msgpack, 0);
 	ok(fsize == esize && result[esize] == '\0',
 	   "mp_snprint limit = expected + 1");
 
 	FILE *tmpf = tmpfile();
 	if (tmpf != NULL) {
-		int fsize = mp_fprint(tmpf, msgpack);
+		int fsize = mp_fprint(tmpf, msgpack, 0);
 		ok(fsize == esize, "mp_fprint return value");
 		(void) rewind(tmpf);
 		int rsize = fread(result, 1, sizeof(result), tmpf);
@@ -1238,7 +1238,7 @@ test_mp_print()
 	}
 
 	/* stdin is read-only */
-	int rc = mp_fprint(stdin, msgpack);
+	int rc = mp_fprint(stdin, msgpack, 0);
 	is(rc, -1, "mp_fprint I/O error");
 
 	/* Test mp_snprint max nesting depth. */
@@ -1265,7 +1265,7 @@ test_mp_print()
 		exp_str_wptr += rc;
 	}
 	assert(exp_str_wptr + 1 == exp_str + exp_str_sz);
-	rc = mp_snprint(decoded, exp_str_sz, mp_buff);
+	rc = mp_snprint(decoded, exp_str_sz, mp_buff, 0);
 	ok(rc == exp_str_sz - 1, "mp_snprint max nesting depth return value");
 	ok(strcmp(decoded, exp_str) == 0, "mp_snprint max nesting depth result");
 	free(decoded);
@@ -1281,7 +1281,7 @@ enum mp_ext_test_type {
 };
 
 static int
-mp_fprint_ext_test(FILE *file, const char **data, int depth)
+mp_fprint_ext_test(FILE *file, const char **data, int depth, uint32_t flags)
 {
 	int8_t type;
 	uint32_t len = mp_decode_extl(data, &type);
@@ -1291,13 +1291,13 @@ mp_fprint_ext_test(FILE *file, const char **data, int depth)
 	case MP_EXT_TEST_PLAIN:
 		return fprintf(file, "%.*s", len, ext);
 	case MP_EXT_TEST_MSGPACK:
-		return mp_fprint_recursion(file, &ext, depth);
+		return mp_fprint_recursion(file, &ext, depth, flags);
 	}
 	return fprintf(file, "undefined");
 }
 
 static int
-mp_snprint_ext_test(char *buf, int size, const char **data, int depth)
+mp_snprint_ext_test(char *buf, int size, const char **data, int depth, uint32_t flags)
 {
 	int8_t type;
 	uint32_t len = mp_decode_extl(data, &type);
@@ -1307,7 +1307,7 @@ mp_snprint_ext_test(char *buf, int size, const char **data, int depth)
 	case MP_EXT_TEST_PLAIN:
 		return snprintf(buf, size, "%.*s", len, ext);
 	case MP_EXT_TEST_MSGPACK:
-		return mp_snprint_recursion(buf, size, &ext, depth);
+		return mp_snprint_recursion(buf, size, &ext, depth, flags);
 	}
 	return snprintf(buf, size, "undefined");
 }
@@ -1331,8 +1331,8 @@ test_mp_print_ext(void)
 	pos = mp_encode_str(pos, plain, plain_len);
 	pos = mp_encode_uint(pos, 200);
 
-	int size = mp_snprint(NULL, 0, buf);
-	int real_size = mp_snprint(str, sizeof(str), buf);
+	int size = mp_snprint(NULL, 0, buf, 0);
+	int real_size = mp_snprint(str, sizeof(str), buf, 0);
 	is(size, real_size, "mp_snrpint size match");
 	const char *expected = "[100, plain-str, \"plain-str\", 200]";
 	is(strcmp(str, expected), 0, "str is correct");
@@ -1340,7 +1340,7 @@ test_mp_print_ext(void)
 	FILE *tmpf = tmpfile();
 	if (tmpf == NULL)
 		abort();
-	real_size = mp_fprint(tmpf, buf);
+	real_size = mp_fprint(tmpf, buf, 0);
 	is(size, real_size, "mp_fprint size match");
 	rewind(tmpf);
 	real_size = (int) fread(str, 1, sizeof(str), tmpf);
@@ -1358,7 +1358,7 @@ test_mp_print_ext(void)
 static int
 test_mp_print_ext_tnt(void)
 {
-	plan(5);
+	plan(7);
 	header();
 	mp_snprint_ext = mp_snprint_ext_tnt;
 	mp_fprint_ext = mp_fprint_ext_tnt;
@@ -1424,14 +1424,33 @@ test_mp_print_ext_tnt(void)
 		"]";
 
 	char result[2048];
-	int fsize = mp_snprint(result, sizeof(result), (const char*)mp_ext_array);
+	int fsize = mp_snprint(result, sizeof(result), (const char*)mp_ext_array, 0);
 	ok(fsize == sizeof(expected) - 1, "mp_snprint return value");
 	ok(strcmp(result, expected) == 0, "mp_snprint result");
+
+	const char expected2[] =
+		"[\"0\", \"0\", \"1\", \"-1\", \"-12.34\", \"-123.45\", \"-1.0000\", \"1\", \"0.1\", \"0.01\", "
+		"\"0.000000000000000000000000000000000010\", \"10\", \"100\", "
+		"\"10000000000000000000000000000000000000\", \"12\", \"1.2\", "
+		"\"0.12\", \"0.012\", \"120\", \"1200\", \"12000\", "
+		"f6423bdf-b49e-4913-b361-0740c9702e4b, "
+		"{\"stack\": [{\"type\": \"ClientError\", \"line\": 1239, \"file\": \"/opt/tarantool/api/ext.lua\", \"message\": \"order is not found\", \"code\": 20001, \"fields\": {\"name\": \"UNKNOWN\"}}]}, "
+		"1629473120.123456789, "
+		"1614470400, "
+		"{\"year\": 1, \"month\": 200, \"day\": -77}, "
+		"{\"year\": 1, \"month\": 200, \"day\": -77, \"adjust\": \"last\"}, "
+		"{\"week\": 1, \"day\": -1}"
+		"]";
+
+
+	fsize = mp_snprint(result, sizeof(result), (const char*)mp_ext_array, QUOTE_DECIMAL | UNQUOTE_UUID);
+	ok(fsize == sizeof(expected2) - 1, "mp_snprint return value");
+	ok(strcmp(result, expected2) == 0, "mp_snprint result");
 
 	FILE *tmpf = tmpfile();
 	if (tmpf == NULL)
 		abort();
-	fsize = mp_fprint(tmpf, (const char*)mp_ext_array);
+	fsize = mp_fprint(tmpf, (const char*)mp_ext_array, 0);
 	is(fsize, sizeof(expected) - 1, "mp_fprint size match");
 	rewind(tmpf);
 	/*fsize = 0;
